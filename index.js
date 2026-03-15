@@ -6,9 +6,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-let tasks = []; // لتخزين المؤقتات لكل مهمة
+let tasks = [];
 
-// API لتشغيل النشر التلقائي
 app.post("/start", (req, res) => {
   const { botToken, chatId, message, interval } = req.body;
 
@@ -16,28 +15,30 @@ app.post("/start", (req, res) => {
     return res.status(400).send("الرجاء تعبئة كل الحقول");
   }
 
-  const intervalMs = interval * 60000; // تحويل دقائق إلى ميلي ثانية
+  console.log("تم استلام مهمة جديدة:");
+  console.log("Bot Token:", botToken);
+  console.log("Chat ID:", chatId);
+  console.log("Message:", message);
+  console.log("Interval (min):", interval);
 
-  // تشغيل المؤقت لإرسال الرسالة كل فترة
+  const intervalMs = interval * 60000;
+
   const timer = setInterval(async () => {
     try {
-      await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      const response = await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         chat_id: chatId,
         text: message
       });
-      console.log("Message sent to", chatId);
+      console.log("تم إرسال الرسالة بنجاح:", response.data);
     } catch (err) {
-      console.error("Failed to send message:", err.message);
+      console.error("فشل إرسال الرسالة:", err.message);
     }
   }, intervalMs);
 
-  // تخزين المؤقت ليتمكن من الإيقاف لاحقًا
   tasks.push(timer);
-
   res.send("تم بدء النشر التلقائي");
 });
 
-// API لإيقاف جميع المهام
 app.post("/stop", (req, res) => {
   tasks.forEach(timer => clearInterval(timer));
   tasks = [];
