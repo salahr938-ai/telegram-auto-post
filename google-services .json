@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "1038816553101",
+    "project_id": "dsdsd-64ad4",
+    "storage_bucket": "dsdsd-64ad4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1038816553101:android:21e3a85008a80bc9231ac4",
+        "android_client_info": {
+          "package_name": "com.example.rajio4tryd"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1038816553101-fdmnqjq6jhrm1093t53ed084eppimkj6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDvIJfFhxMgzO4qzdfRrENeScf19bwApMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1038816553101-fdmnqjq6jhrm1093t53ed084eppimkj6.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
