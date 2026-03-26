@@ -69,65 +69,41 @@ const User = mongoose.model("User", userSchema);
 let tasks = {};
 
 // ===================
-// 🧪 Test Route
+// 🧪 Test
 // ===================
 app.get("/", (req, res) => {
   res.send("✅ Server is working");
 });
 
 // ===================
-// 🔹 حفظ التوكن
+// 🔥 saveAndStart (الأهم)
 // ===================
-app.post("/saveToken", async (req, res) => {
-  console.log("📥 /saveToken hit");
+app.post("/saveAndStart", async (req, res) => {
+  console.log("📥 /saveAndStart hit");
 
   try {
-    const { userId, botToken } = req.body;
+    const { userId, botToken, chatId, message, interval } = req.body;
 
-    if (!userId || !botToken) {
+    if (!userId || !botToken || !chatId || !message || !interval) {
       return res.status(400).send("❌ بيانات ناقصة");
     }
 
+    // 🔐 تشفير التوكن
     const encryptedToken = encrypt(botToken);
 
+    // 💾 تخزين
     await User.findOneAndUpdate(
       { userId },
       { userId, botToken: encryptedToken },
       { upsert: true, new: true }
     );
 
-    res.send("✅ تم حفظ التوكن");
-  } catch (err) {
-    console.error("❌ ERROR:", err);
-    res.status(500).send("❌ Error");
-  }
-});
-
-// ===================
-// 🔹 start
-// ===================
-app.post("/start", async (req, res) => {
-  console.log("📥 /start hit");
-
-  try {
-    const { userId, chatId, message, interval } = req.body;
-
-    if (!userId || !chatId || !message || !interval) {
-      return res.status(400).send("❌ بيانات ناقصة");
-    }
-
-    const user = await User.findOne({ userId });
-
-    if (!user) {
-      return res.status(404).send("❌ التوكن غير موجود");
-    }
-
-    const botToken = decrypt(user.botToken);
-
+    // ⛔ إيقاف القديم
     if (tasks[chatId]) {
       clearInterval(tasks[chatId]);
     }
 
+    // 🚀 تشغيل
     const timer = setInterval(async () => {
       try {
         await axios.post(
@@ -145,16 +121,16 @@ app.post("/start", async (req, res) => {
 
     tasks[chatId] = timer;
 
-    res.send("✅ تم بدء النشر");
+    res.send("✅ تم الحفظ وبدء النشر");
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ ERROR:", err);
     res.status(500).send("❌ خطأ في السيرفر");
   }
 });
 
 // ===================
-// 🔹 stop
+// 🛑 Stop
 // ===================
 app.post("/stop", (req, res) => {
   console.log("📥 /stop hit");
@@ -175,9 +151,24 @@ app.post("/stop", (req, res) => {
 });
 
 // ===================
-// 🚀 تشغيل السيرفر (مهم)
+// 🗑️ Delete Token
 // ===================
-const PORT = 3000;
+app.post("/deleteToken", async (req, res) => {
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).send("❌ userId مطلوب");
+  }
+
+  await User.deleteOne({ userId });
+
+  res.send("🗑️ تم حذف التوكن");
+});
+
+// ===================
+// 🚀 تشغيل
+// ===================
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
