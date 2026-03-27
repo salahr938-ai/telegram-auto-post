@@ -1,4 +1,3 @@
-// index.js
 const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
@@ -35,17 +34,6 @@ function decrypt(hash) {
 }
 
 // ===================
-// 🔗 MongoDB
-// ===================
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 5000 // وقت انتظار أقصى 5 ثواني
-})
-.then(() => console.log("✅ Connected to MongoDB"))
-.catch(err => console.error("❌ MongoDB Connection Error:", err));
-
-// ===================
 // 🧩 Model
 // ===================
 const userSchema = new mongoose.Schema({
@@ -68,7 +56,7 @@ app.get("/", (req, res) => {
 });
 
 // ===================
-// 🔹 حفظ التوكن + start
+// 🔹 saveAndStart (حفظ التوكن)
 // ===================
 app.post("/saveAndStart", async (req, res) => {
   console.log("📥 /saveAndStart hit");
@@ -85,11 +73,10 @@ app.post("/saveAndStart", async (req, res) => {
     await User.findOneAndUpdate(
       { userId },
       { userId, botToken: encryptedToken },
-      { upsert: true, returnDocument: 'after' } // تعديل 'new' deprecated
+      { upsert: true, returnDocument: "after" }
     );
 
-    // تأكيد نجاح العملية للمستخدم
-    res.send({ message: "✅ تم إعداد المستخدم بنجاح" });
+    res.send("✅ تم إعداد المستخدم بنجاح");
 
   } catch (err) {
     console.error("❌ ERROR:", err);
@@ -98,7 +85,7 @@ app.post("/saveAndStart", async (req, res) => {
 });
 
 // ===================
-// 🔹 start نشر الرسائل
+// 🔹 start
 // ===================
 app.post("/start", async (req, res) => {
   console.log("📥 /start hit");
@@ -130,6 +117,7 @@ app.post("/start", async (req, res) => {
     }, interval * 1000);
 
     tasks[chatId] = timer;
+
     res.send("✅ تم بدء النشر");
 
   } catch (err) {
@@ -158,9 +146,22 @@ app.post("/stop", (req, res) => {
 });
 
 // ===================
-// 🚀 تشغيل السيرفر
+// 🚀 الاتصال بـ MongoDB ثم تشغيل السيرفر
 // ===================
-const PORT = 3000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+  serverSelectionTimeoutMS: 5000
+})
+.then(() => {
+  console.log("✅ Connected to MongoDB");
+
+  const PORT = 3000;
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+  });
+
+})
+.catch(err => {
+  console.error("❌ MongoDB Connection Error:", err);
 });
