@@ -38,7 +38,10 @@ function decrypt(hash) {
 // ===================
 const userSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
-  botToken: { type: String, required: true }
+  botToken: { type: String, required: true },
+  chatId: { type: String, required: true },
+  message: { type: String, required: true },
+  interval: { type: Number, required: true } // بالثواني
 });
 
 const User = mongoose.model("User", userSchema);
@@ -62,33 +65,30 @@ app.get("/", (req, res) => {
 app.post("/saveAndStart", async (req, res) => {
   console.log("📥 /saveAndStart hit");
 
-  if (!isDbConnected) {
-    return res.status(503).send("⏳ السيرفر مازال يتصل بقاعدة البيانات");
-  }
+  if (!isDbConnected) return res.status(503).send("⏳ السيرفر مازال يتصل بقاعدة البيانات");
 
   try {
     const { userId, botToken, chatId, message, interval } = req.body;
-
     if (!userId || !botToken || !chatId || !message || !interval) {
       return res.status(400).send("❌ بيانات ناقصة");
     }
 
-    // 🔐 تشفير التوكن
     const encryptedToken = encrypt(botToken);
 
-    // 💾 حفظ التوكن
+    // 💾 حفظ المهمة كاملة في MongoDB
     await User.findOneAndUpdate(
       { userId },
-      { userId, botToken: encryptedToken },
+      { userId, botToken: encryptedToken, chatId, message, interval },
       { upsert: true, returnDocument: "after" }
     );
 
-    // 🔁 تشغيل النشر
+    // 🔁 تشغيل interval جديد
     if (tasks[chatId]) clearInterval(tasks[chatId]);
 
-    const timer = setInterval(async () => {
+    const sendMessage = async () => {
       try {
         const user = await User.findOne({ userId });
+        if (!user || !user.botToken) return console.log("⚠️ User not found");
         const token = decrypt(user.botToken);
 
         await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -96,13 +96,17 @@ app.post("/saveAndStart", async (req, res) => {
           text: message,
         });
 
-        console.log("✅ Message sent");
+        console.log(`✅ Message sent to chatId ${chatId}`);
       } catch (err) {
         console.log("❌ Telegram Error:", err.message);
       }
-    }, interval * 1000);
+    };
 
-    tasks[chatId] = timer;
+    // إرسال أول رسالة فوراً
+    sendMessage();
+
+    // بدء interval للنشر الدوري
+    tasks[chatId] = setInterval(sendMessage, interval * 1000);
 
     res.send("✅ تم إعداد المستخدم وبدء النشر");
 
@@ -119,7 +123,6 @@ app.post("/stop", (req, res) => {
   console.log("📥 /stop hit");
 
   const { chatId } = req.body;
-
   if (!chatId) return res.status(400).send("❌ لازم chatId");
 
   if (tasks[chatId]) {
@@ -132,16 +135,40 @@ app.post("/stop", (req, res) => {
 });
 
 // ===================
-// 🚀 MongoDB Connection
+// 🚀 MongoDB Connection + استرجاع المهام عند بدء السيرفر
 // ===================
 mongoose.connect(process.env.MONGO_URI)
-.then(() => {
+.then(async () => {
   console.log("✅ Connected to MongoDB");
   isDbConnected = true;
+
+  // استرجاع كل المهام وتشغيلها تلقائياً
+  const users = await User.find({});
+  users.forEach(user => {
+    const { userId, chatId, message, interval, botToken } = user;
+    if (!tasks[chatId]) {
+      const sendMessage = async () => {
+        try {
+          const token = decrypt(botToken);
+          await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+            chat_id: chatId,
+            text: message,
+          });
+          console.log(`✅ Message sent to chatId ${chatId}`);
+        } catch (err) {
+          console.log("❌ Telegram Error:", err.message);
+        }
+      };
+
+      // إرسال أول رسالة فوراً
+      sendMessage();
+
+      // بدء interval
+      tasks[chatId] = setInterval(sendMessage, interval * 1000);
+    }
+  });
 })
-.catch(err => {
-  console.error("❌ MongoDB Error:", err);
-});
+.catch(err => console.error("❌ MongoDB Error:", err));
 
 // ===================
 // 🚀 تشغيل السيرفر
