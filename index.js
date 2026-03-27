@@ -98,7 +98,7 @@ app.post("/saveAndStart", async (req, res) => {
 
         console.log(`✅ Message sent to chatId ${chatId}`);
       } catch (err) {
-        console.log("❌ Telegram Error:", err.message);
+        console.log("❌ FULL ERROR:", err.response?.data || err.message);
       }
     };
 
