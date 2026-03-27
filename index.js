@@ -47,6 +47,7 @@ const User = mongoose.model("User", userSchema);
 // ⏱️ Tasks
 // ===================
 let tasks = {};
+let isDbConnected = false;
 
 // ===================
 // 🧪 Test Route
@@ -56,60 +57,45 @@ app.get("/", (req, res) => {
 });
 
 // ===================
-// 🔹 saveAndStart (حفظ التوكن)
+// 🔹 saveAndStart
 // ===================
 app.post("/saveAndStart", async (req, res) => {
   console.log("📥 /saveAndStart hit");
 
-  try {
-    const { userId, botToken } = req.body;
+  if (!isDbConnected) {
+    return res.status(503).send("⏳ السيرفر مازال يتصل بقاعدة البيانات");
+  }
 
-    if (!userId || !botToken) {
+  try {
+    const { userId, botToken, chatId, message, interval } = req.body;
+
+    if (!userId || !botToken || !chatId || !message || !interval) {
       return res.status(400).send("❌ بيانات ناقصة");
     }
 
+    // 🔐 تشفير التوكن
     const encryptedToken = encrypt(botToken);
 
+    // 💾 حفظ التوكن
     await User.findOneAndUpdate(
       { userId },
       { userId, botToken: encryptedToken },
       { upsert: true, returnDocument: "after" }
     );
 
-    res.send("✅ تم إعداد المستخدم بنجاح");
-
-  } catch (err) {
-    console.error("❌ ERROR:", err);
-    res.status(500).send("❌ خطأ في السيرفر");
-  }
-});
-
-// ===================
-// 🔹 start
-// ===================
-app.post("/start", async (req, res) => {
-  console.log("📥 /start hit");
-
-  try {
-    const { userId, chatId, message, interval } = req.body;
-
-    if (!userId || !chatId || !message || !interval) {
-      return res.status(400).send("❌ بيانات ناقصة");
-    }
-
-    const user = await User.findOne({ userId });
-    if (!user) return res.status(404).send("❌ التوكن غير موجود");
-
-    const botToken = decrypt(user.botToken);
-
+    // 🔁 تشغيل النشر
     if (tasks[chatId]) clearInterval(tasks[chatId]);
 
     const timer = setInterval(async () => {
       try {
-        await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        const user = await User.findOne({ userId });
+        const token = decrypt(user.botToken);
+
+        await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
           chat_id: chatId,
           text: message,
         });
+
         console.log("✅ Message sent");
       } catch (err) {
         console.log("❌ Telegram Error:", err.message);
@@ -118,10 +104,10 @@ app.post("/start", async (req, res) => {
 
     tasks[chatId] = timer;
 
-    res.send("✅ تم بدء النشر");
+    res.send("✅ تم إعداد المستخدم وبدء النشر");
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ ERROR:", err);
     res.status(500).send("❌ خطأ في السيرفر");
   }
 });
@@ -139,29 +125,28 @@ app.post("/stop", (req, res) => {
   if (tasks[chatId]) {
     clearInterval(tasks[chatId]);
     delete tasks[chatId];
-    return res.send("🛑 تم الإيقاف");
+    return res.send("🛑 تم إيقاف النشر");
   }
 
   res.send("⚠️ لا يوجد Task");
 });
 
 // ===================
-// 🚀 الاتصال بـ MongoDB ثم تشغيل السيرفر
+// 🚀 MongoDB Connection
 // ===================
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 5000
-})
+mongoose.connect(process.env.MONGO_URI)
 .then(() => {
   console.log("✅ Connected to MongoDB");
-
-  const PORT = 3000;
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-  });
-
+  isDbConnected = true;
 })
 .catch(err => {
-  console.error("❌ MongoDB Connection Error:", err);
+  console.error("❌ MongoDB Error:", err);
+});
+
+// ===================
+// 🚀 تشغيل السيرفر
+// ===================
+const PORT = 3000;
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
