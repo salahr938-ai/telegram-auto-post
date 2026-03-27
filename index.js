@@ -60,9 +60,9 @@ app.get("/", (req, res) => {
 });
 
 // ===================
-// 🔹 إرسال رسالة
+// 🔹 إرسال رسالة مع Retry
 // ===================
-async function sendTelegramMessage(user) {
+async function sendTelegramMessage(user, attempt = 1) {
   try {
     const token = decrypt(user.botToken);
 
@@ -74,7 +74,17 @@ async function sendTelegramMessage(user) {
     console.log(`✅ Message sent to ${user.chatId}`);
 
   } catch (err) {
-    console.log("❌ FULL ERROR:", err.response?.data || err.message);
+    console.log(`❌ ERROR attempt ${attempt} for ${user.chatId}:`, err.response?.data || err.message);
+
+    // Retry 5 مرات مع تأخير 10 ثواني
+    if (attempt < 5) {
+      console.log(`🔄 Retrying message to ${user.chatId} in 10s...`);
+      setTimeout(() => {
+        sendTelegramMessage(user, attempt + 1);
+      }, 10000);
+    } else {
+      console.log(`⚠️ Failed to send message to ${user.chatId} after 5 attempts.`);
+    }
   }
 }
 
@@ -115,7 +125,7 @@ app.post("/saveAndStart", async (req, res) => {
     const user = await User.findOneAndUpdate(
       { userId },
       { userId, botToken: encryptedToken, chatId, message, interval },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' } // بدل new: true حسب التحذير
     );
 
     startTask(user);
