@@ -42,7 +42,7 @@ const userSchema = new mongoose.Schema({
   chatId: { type: String, required: true },
   message: { type: String, required: true },
   interval: { type: Number, required: true }
-});
+}, { timestamps: true }); // 🔥 مهم
 
 const User = mongoose.model("User", userSchema);
 
@@ -57,6 +57,29 @@ let isDbConnected = false;
 // ===================
 app.get("/", (req, res) => {
   res.send("✅ Server is working");
+});
+
+// ===================
+// 🔹 get orders (جديد)
+// ===================
+app.get("/orders", async (req, res) => {
+  try {
+    const users = await User.find({});
+
+    const data = users.map(u => ({
+      id: u._id,
+      message: u.message,
+      intervalMinutes: Math.floor(u.interval / 60),
+      timestamp: u.createdAt,
+      chatId: u.chatId
+    }));
+
+    res.json(data);
+
+  } catch (err) {
+    console.log("❌ GET ORDERS ERROR:", err);
+    res.status(500).send("❌ خطأ");
+  }
 });
 
 // ===================
@@ -76,14 +99,11 @@ async function sendTelegramMessage(user, attempt = 1) {
   } catch (err) {
     console.log(`❌ ERROR attempt ${attempt} for ${user.chatId}:`, err.response?.data || err.message);
 
-    // Retry 5 مرات مع تأخير 10 ثواني
     if (attempt < 5) {
-      console.log(`🔄 Retrying message to ${user.chatId} in 10s...`);
+      console.log(`🔄 Retrying in 10s...`);
       setTimeout(() => {
         sendTelegramMessage(user, attempt + 1);
       }, 10000);
-    } else {
-      console.log(`⚠️ Failed to send message to ${user.chatId} after 5 attempts.`);
     }
   }
 }
@@ -94,10 +114,8 @@ async function sendTelegramMessage(user, attempt = 1) {
 function startTask(user) {
   if (tasks[user.chatId]) clearInterval(tasks[user.chatId]);
 
-  // أول إرسال
   sendTelegramMessage(user);
 
-  // التكرار
   tasks[user.chatId] = setInterval(() => {
     sendTelegramMessage(user);
   }, user.interval * 1000);
@@ -110,7 +128,7 @@ app.post("/saveAndStart", async (req, res) => {
   console.log("📥 /saveAndStart hit");
 
   if (!isDbConnected) {
-    return res.status(503).send("⏳ السيرفر مازال يتصل بقاعدة البيانات");
+    return res.status(503).send("⏳ DB not ready");
   }
 
   try {
@@ -125,16 +143,16 @@ app.post("/saveAndStart", async (req, res) => {
     const user = await User.findOneAndUpdate(
       { userId },
       { userId, botToken: encryptedToken, chatId, message, interval },
-      { upsert: true, returnDocument: 'after' } // بدل new: true حسب التحذير
+      { upsert: true, returnDocument: "after" }
     );
 
     startTask(user);
 
-    res.send("✅ تم بدء النشر");
+    res.send("✅ Started");
 
   } catch (err) {
     console.log("❌ SERVER ERROR:", err);
-    res.status(500).send("❌ خطأ في السيرفر");
+    res.status(500).send("❌ خطأ");
   }
 });
 
@@ -160,7 +178,7 @@ app.post("/stop", async (req, res) => {
 });
 
 // ===================
-// 🚀 MongoDB + استرجاع المهام
+// 🚀 MongoDB + Restore
 // ===================
 mongoose.connect(process.env.MONGO_URI)
 .then(async () => {
@@ -168,7 +186,6 @@ mongoose.connect(process.env.MONGO_URI)
   isDbConnected = true;
 
   const users = await User.find({});
-
   console.log(`🔄 Restoring ${users.length} tasks...`);
 
   users.forEach(user => {
