@@ -42,7 +42,7 @@ const userSchema = new mongoose.Schema({
   chatId: { type: String, required: true },
   message: { type: String, required: true },
   interval: { type: Number, required: true }
-}, { timestamps: true }); // 🔥 مهم
+}, { timestamps: true });
 
 const User = mongoose.model("User", userSchema);
 
@@ -60,17 +60,17 @@ app.get("/", (req, res) => {
 });
 
 // ===================
-// 🔹 get orders (جديد)
+// 🔹 get orders (🔥 FIXED)
 // ===================
 app.get("/orders", async (req, res) => {
   try {
     const users = await User.find({});
 
     const data = users.map(u => ({
-      id: u._id,
+      id: u._id.toString(),
       message: u.message,
       intervalMinutes: Math.floor(u.interval / 60),
-      timestamp: u.createdAt,
+      timestamp: new Date(u.createdAt).getTime(), // 🔥 الحل هنا
       chatId: u.chatId
     }));
 
