@@ -70,7 +70,7 @@ app.get("/orders", async (req, res) => {
       id: u._id.toString(),
       message: u.message,
       intervalMinutes: Math.floor(u.interval / 60),
-      timestamp: new Date(u.createdAt).getTime(), // 🔥 الحل هنا
+      timestamp: new Date(u.createdAt).getTime(),
       chatId: u.chatId
     }));
 
@@ -112,11 +112,13 @@ async function sendTelegramMessage(user, attempt = 1) {
 // 🔹 تشغيل مهمة
 // ===================
 function startTask(user) {
-  if (tasks[user.chatId]) clearInterval(tasks[user.chatId]);
+  const key = String(user.chatId).trim(); // 🔹 تعديل هنا لضمان تطابق key
+
+  if (tasks[key]) clearInterval(tasks[key]);
 
   sendTelegramMessage(user);
 
-  tasks[user.chatId] = setInterval(() => {
+  tasks[key] = setInterval(() => {
     sendTelegramMessage(user);
   }, user.interval * 1000);
 }
@@ -168,9 +170,15 @@ app.post("/stop", async (req, res) => {
     return res.status(400).send("❌ لازم chatId");
   }
 
-  if (tasks[chatId]) {
-    clearInterval(tasks[chatId]);
-    delete tasks[chatId];
+  const key = String(chatId).trim(); // 🔹 تعديل هنا
+
+  console.log("Trying to stop:", key);
+  console.log("Existing tasks:", Object.keys(tasks));
+
+  if (tasks[key]) {
+    clearInterval(tasks[key]);
+    delete tasks[key];
+
     return res.send("🛑 تم الإيقاف");
   }
 
