@@ -129,7 +129,6 @@ app.post("/saveAndStart", async (req, res) => {
 // ===================
 app.post("/stop", async (req, res) => {
   const { chatId } = req.body;
-  console.log("📥 /stop hit, chatId:", chatId);
   if (!chatId) return res.status(400).send("❌ لازم chatId");
   if (tasks[chatId]) {
     clearInterval(tasks[chatId]);
@@ -157,6 +156,34 @@ app.post("/start", async (req, res) => {
     res.send("▶️ Task started");
   } catch (err) {
     console.log("❌ Start Task Error:", err);
+    res.status(500).send("❌ خطأ");
+  }
+});
+
+// ===================
+// 🔹 deleteUser (جديد)
+// ===================
+app.post("/deleteUser", async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).send("❌ لازم userId");
+
+  try {
+    const user = await User.findOne({ userId });
+
+    // 1️⃣ نوقف المهمة لو كانت شغالة
+    if (user && tasks[user.chatId]) {
+      clearInterval(tasks[user.chatId]);
+      delete tasks[user.chatId];
+      console.log(`🛑 Task for ${user.chatId} stopped`);
+    }
+
+    // 2️⃣ نحذف المستخدم من MongoDB
+    await User.deleteOne({ userId });
+    console.log(`🗑️ User ${userId} deleted from DB`);
+
+    res.send("✅ User deleted successfully");
+  } catch (err) {
+    console.log("❌ DeleteUser Error:", err);
     res.status(500).send("❌ خطأ");
   }
 });
