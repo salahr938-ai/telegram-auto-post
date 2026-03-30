@@ -29,8 +29,7 @@ function decrypt(hash) {
   const iv = Buffer.from(ivHex, "hex");
   const content = Buffer.from(contentHex, "hex");
   const decipher = crypto.createDecipheriv(algorithm, key, iv);
-  const decrypted = Buffer.concat([decipher.update(content), decipher.final()]);
-  return decrypted.toString("utf8");
+  return Buffer.concat([decipher.update(content), decipher.final()]).toString("utf8");
 }
 
 // ===================
@@ -55,17 +54,14 @@ let isDbConnected = false;
 // ===================
 // 🧪 Test Route
 // ===================
-app.get("/", (req, res) => {
-  res.send("✅ Server is working");
-});
+app.get("/", (req, res) => res.send("✅ Server is working"));
 
 // ===================
-// 🔹 get orders (🔥 FIXED)
+// 🔹 get orders
 // ===================
 app.get("/orders", async (req, res) => {
   try {
     const users = await User.find({});
-
     const data = users.map(u => ({
       id: u._id.toString(),
       message: u.message,
@@ -73,9 +69,7 @@ app.get("/orders", async (req, res) => {
       timestamp: new Date(u.createdAt).getTime(),
       chatId: u.chatId
     }));
-
     res.json(data);
-
   } catch (err) {
     console.log("❌ GET ORDERS ERROR:", err);
     res.status(500).send("❌ خطأ");
@@ -88,23 +82,14 @@ app.get("/orders", async (req, res) => {
 async function sendTelegramMessage(user, attempt = 1) {
   try {
     const token = decrypt(user.botToken);
-
     await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
       chat_id: user.chatId,
       text: user.message,
     });
-
     console.log(`✅ Message sent to ${user.chatId}`);
-
   } catch (err) {
     console.log(`❌ ERROR attempt ${attempt} for ${user.chatId}:`, err.response?.data || err.message);
-
-    if (attempt < 5) {
-      console.log(`🔄 Retrying in 10s...`);
-      setTimeout(() => {
-        sendTelegramMessage(user, attempt + 1);
-      }, 10000);
-    }
+    if (attempt < 5) setTimeout(() => sendTelegramMessage(user, attempt + 1), 10000);
   }
 }
 
@@ -112,46 +97,27 @@ async function sendTelegramMessage(user, attempt = 1) {
 // 🔹 تشغيل مهمة
 // ===================
 function startTask(user) {
-  const key = String(user.chatId).trim(); // 🔹 تعديل هنا لضمان تطابق key
-
-  if (tasks[key]) clearInterval(tasks[key]);
-
+  if (tasks[user.chatId]) clearInterval(tasks[user.chatId]);
   sendTelegramMessage(user);
-
-  tasks[key] = setInterval(() => {
-    sendTelegramMessage(user);
-  }, user.interval * 1000);
+  tasks[user.chatId] = setInterval(() => sendTelegramMessage(user), user.interval * 1000);
 }
 
 // ===================
 // 🔹 saveAndStart
 // ===================
 app.post("/saveAndStart", async (req, res) => {
-  console.log("📥 /saveAndStart hit");
-
-  if (!isDbConnected) {
-    return res.status(503).send("⏳ DB not ready");
-  }
-
+  if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
   try {
     const { userId, botToken, chatId, message, interval } = req.body;
-
-    if (!userId || !botToken || !chatId || !message || !interval) {
-      return res.status(400).send("❌ بيانات ناقصة");
-    }
-
+    if (!userId || !botToken || !chatId || !message || !interval) return res.status(400).send("❌ بيانات ناقصة");
     const encryptedToken = encrypt(botToken);
-
     const user = await User.findOneAndUpdate(
       { userId },
       { userId, botToken: encryptedToken, chatId, message, interval },
       { upsert: true, returnDocument: "after" }
     );
-
     startTask(user);
-
     res.send("✅ Started");
-
   } catch (err) {
     console.log("❌ SERVER ERROR:", err);
     res.status(500).send("❌ خطأ");
@@ -162,27 +128,37 @@ app.post("/saveAndStart", async (req, res) => {
 // 🔹 stop
 // ===================
 app.post("/stop", async (req, res) => {
-  console.log("📥 /stop hit");
-
   const { chatId } = req.body;
-
-  if (!chatId) {
-    return res.status(400).send("❌ لازم chatId");
-  }
-
-  const key = String(chatId).trim(); // 🔹 تعديل هنا
-
-  console.log("Trying to stop:", key);
-  console.log("Existing tasks:", Object.keys(tasks));
-
-  if (tasks[key]) {
-    clearInterval(tasks[key]);
-    delete tasks[key];
-
+  console.log("📥 /stop hit, chatId:", chatId);
+  if (!chatId) return res.status(400).send("❌ لازم chatId");
+  if (tasks[chatId]) {
+    clearInterval(tasks[chatId]);
+    delete tasks[chatId];
+    console.log("🛑 Task removed, remaining:", Object.keys(tasks));
     return res.send("🛑 تم الإيقاف");
   }
-
   res.send("⚠️ لا يوجد Task");
+});
+
+// ===================
+// 🔹 start existing task
+// ===================
+app.post("/start", async (req, res) => {
+  const { chatId } = req.body;
+  if (!chatId) return res.status(400).send("❌ لازم chatId");
+  try {
+    const user = await User.findOne({ chatId });
+    if (!user) return res.status(404).send("❌ User مش موجود");
+    if (tasks[chatId]) {
+      clearInterval(tasks[chatId]);
+      delete tasks[chatId];
+    }
+    startTask(user);
+    res.send("▶️ Task started");
+  } catch (err) {
+    console.log("❌ Start Task Error:", err);
+    res.status(500).send("❌ خطأ");
+  }
 });
 
 // ===================
@@ -192,23 +168,14 @@ mongoose.connect(process.env.MONGO_URI)
 .then(async () => {
   console.log("✅ Connected to MongoDB");
   isDbConnected = true;
-
   const users = await User.find({});
   console.log(`🔄 Restoring ${users.length} tasks...`);
-
-  users.forEach(user => {
-    startTask(user);
-  });
-
+  users.forEach(user => startTask(user));
 })
-.catch(err => {
-  console.log("❌ MongoDB Error:", err);
-});
+.catch(err => console.log("❌ MongoDB Error:", err));
 
 // ===================
 // 🚀 تشغيل السيرفر
 // ===================
 const PORT = 3000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Server running on port ${PORT}`));
