@@ -33,10 +33,10 @@ function decrypt(hash) {
 }
 
 // ===================
-// 🧩 Model
+// 🧩 Model (FIXED)
 // ===================
 const userSchema = new mongoose.Schema({
-  userId: { type: String, required: true, unique: true },
+  userId: { type: String, required: true }, // ❌ حذفنا unique
   botToken: { type: String, required: true },
   chatId: { type: String, required: true },
   message: { type: String, required: true },
@@ -46,7 +46,7 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model("User", userSchema);
 
 // ===================
-// ⏱️ Tasks
+// ⏱️ Tasks (FIXED)
 // ===================
 let tasks = {};
 let isDbConnected = false;
@@ -57,11 +57,18 @@ let isDbConnected = false;
 app.get("/", (req, res) => res.send("✅ Server is working"));
 
 // ===================
-// 🔹 get orders
+// 🔹 get orders (FIXED)
 // ===================
 app.get("/orders", async (req, res) => {
   try {
-    const users = await User.find({});
+    const userId = req.query.userId;
+
+    if (!userId) {
+      return res.status(400).send("❌ userId required");
+    }
+
+    const users = await User.find({ userId });
+
     const data = users.map(u => ({
       id: u._id.toString(),
       message: u.message,
@@ -69,7 +76,9 @@ app.get("/orders", async (req, res) => {
       timestamp: new Date(u.createdAt).getTime(),
       chatId: u.chatId
     }));
+
     res.json(data);
+
   } catch (err) {
     console.log("❌ GET ORDERS ERROR:", err);
     res.status(500).send("❌ خطأ");
@@ -77,7 +86,7 @@ app.get("/orders", async (req, res) => {
 });
 
 // ===================
-// 🔹 إرسال رسالة مع Retry
+// 🔹 إرسال رسالة
 // ===================
 async function sendTelegramMessage(user, attempt = 1) {
   try {
@@ -94,30 +103,49 @@ async function sendTelegramMessage(user, attempt = 1) {
 }
 
 // ===================
-// 🔹 تشغيل مهمة
+// 🔹 تشغيل مهمة (FIXED)
 // ===================
 function startTask(user) {
-  if (tasks[user.chatId]) clearInterval(tasks[user.chatId]);
+  const key = user._id.toString();
+
+  if (tasks[key]) clearInterval(tasks[key]);
+
   sendTelegramMessage(user);
-  tasks[user.chatId] = setInterval(() => sendTelegramMessage(user), user.interval * 1000);
+
+  tasks[key] = setInterval(
+    () => sendTelegramMessage(user),
+    user.interval * 1000
+  );
 }
 
 // ===================
-// 🔹 saveAndStart
+// 🔹 saveAndStart (FIXED)
 // ===================
 app.post("/saveAndStart", async (req, res) => {
   if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+
   try {
     const { userId, botToken, chatId, message, interval } = req.body;
-    if (!userId || !botToken || !chatId || !message || !interval) return res.status(400).send("❌ بيانات ناقصة");
+
+    if (!userId || !botToken || !chatId || !message || !interval) {
+      return res.status(400).send("❌ بيانات ناقصة");
+    }
+
     const encryptedToken = encrypt(botToken);
-    const user = await User.findOneAndUpdate(
-      { userId },
-      { userId, botToken: encryptedToken, chatId, message, interval },
-      { upsert: true, returnDocument: "after" }
-    );
+
+    // 🔥 إنشاء طلب جديد كل مرة (مش update)
+    const user = await User.create({
+      userId,
+      botToken: encryptedToken,
+      chatId,
+      message,
+      interval
+    });
+
     startTask(user);
+
     res.send("✅ Started");
+
   } catch (err) {
     console.log("❌ SERVER ERROR:", err);
     res.status(500).send("❌ خطأ");
@@ -125,65 +153,77 @@ app.post("/saveAndStart", async (req, res) => {
 });
 
 // ===================
-// 🔹 stop
+// 🔹 stop (FIXED)
 // ===================
 app.post("/stop", async (req, res) => {
-  const { chatId } = req.body;
-  if (!chatId) return res.status(400).send("❌ لازم chatId");
-  if (tasks[chatId]) {
-    clearInterval(tasks[chatId]);
-    delete tasks[chatId];
-    console.log("🛑 Task removed, remaining:", Object.keys(tasks));
+  const { id } = req.body;
+
+  if (!id) return res.status(400).send("❌ لازم id");
+
+  if (tasks[id]) {
+    clearInterval(tasks[id]);
+    delete tasks[id];
     return res.send("🛑 تم الإيقاف");
   }
+
   res.send("⚠️ لا يوجد Task");
 });
 
 // ===================
-// 🔹 start existing task
+// 🔹 start (FIXED)
 // ===================
 app.post("/start", async (req, res) => {
-  const { chatId } = req.body;
-  if (!chatId) return res.status(400).send("❌ لازم chatId");
+  const { id } = req.body;
+
+  if (!id) return res.status(400).send("❌ لازم id");
+
   try {
-    const user = await User.findOne({ chatId });
-    if (!user) return res.status(404).send("❌ User مش موجود");
-    if (tasks[chatId]) {
-      clearInterval(tasks[chatId]);
-      delete tasks[chatId];
+    const user = await User.findById(id);
+
+    if (!user) return res.status(404).send("❌ مش موجود");
+
+    const key = user._id.toString();
+
+    if (tasks[key]) {
+      clearInterval(tasks[key]);
+      delete tasks[key];
     }
+
     startTask(user);
+
     res.send("▶️ Task started");
+
   } catch (err) {
-    console.log("❌ Start Task Error:", err);
+    console.log("❌ Start Error:", err);
     res.status(500).send("❌ خطأ");
   }
 });
 
 // ===================
-// 🔹 deleteUser (جديد)
+// 🔹 deleteUser (FIXED)
 // ===================
 app.post("/deleteUser", async (req, res) => {
   const { userId } = req.body;
+
   if (!userId) return res.status(400).send("❌ لازم userId");
 
   try {
-    const user = await User.findOne({ userId });
+    const users = await User.find({ userId });
 
-    // 1️⃣ نوقف المهمة لو كانت شغالة
-    if (user && tasks[user.chatId]) {
-      clearInterval(tasks[user.chatId]);
-      delete tasks[user.chatId];
-      console.log(`🛑 Task for ${user.chatId} stopped`);
-    }
+    users.forEach(user => {
+      const key = user._id.toString();
+      if (tasks[key]) {
+        clearInterval(tasks[key]);
+        delete tasks[key];
+      }
+    });
 
-    // 2️⃣ نحذف المستخدم من MongoDB
-    await User.deleteOne({ userId });
-    console.log(`🗑️ User ${userId} deleted from DB`);
+    await User.deleteMany({ userId });
 
-    res.send("✅ User deleted successfully");
+    res.send("✅ تم حذف كل الطلبات");
+
   } catch (err) {
-    console.log("❌ DeleteUser Error:", err);
+    console.log("❌ Delete Error:", err);
     res.status(500).send("❌ خطأ");
   }
 });
@@ -195,8 +235,10 @@ mongoose.connect(process.env.MONGO_URI)
 .then(async () => {
   console.log("✅ Connected to MongoDB");
   isDbConnected = true;
+
   const users = await User.find({});
   console.log(`🔄 Restoring ${users.length} tasks...`);
+
   users.forEach(user => startTask(user));
 })
 .catch(err => console.log("❌ MongoDB Error:", err));
