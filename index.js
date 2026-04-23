@@ -33,10 +33,10 @@ function decrypt(hash) {
 }
 
 // ===================
-// 🧩 Model (FIXED)
+// 🧩 Model
 // ===================
 const userSchema = new mongoose.Schema({
-  userId: { type: String, required: true }, // ❌ حذفنا unique
+  userId: { type: String, required: true },
   botToken: { type: String, required: true },
   chatId: { type: String, required: true },
   message: { type: String, required: true },
@@ -46,28 +46,37 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model("User", userSchema);
 
 // ===================
-// ⏱️ Tasks (FIXED)
+// ⏱️ Tasks (FIXED → Map)
 // ===================
-let tasks = {};
+const tasks = new Map();
 let isDbConnected = false;
 
 // ===================
 // 🧪 Test Route
 // ===================
-app.get("/", (req, res) => res.send("✅ Server is working"));
+app.get("/", (req, res) => {
+  console.log("🔥 ROOT HIT");
+  res.send("✅ Server is working");
+});
 
 // ===================
-// 🔹 get orders (FIXED)
+// 🔹 GET ORDERS (DEBUGGED)
 // ===================
 app.get("/orders", async (req, res) => {
   try {
+    console.log("🔥 ORDERS HIT");
+    console.log("QUERY:", req.query);
+
     const userId = req.query.userId;
 
     if (!userId) {
+      console.log("❌ No userId");
       return res.status(400).send("❌ userId required");
     }
 
     const users = await User.find({ userId });
+
+    console.log("FOUND ORDERS:", users.length);
 
     const data = users.map(u => ({
       id: u._id.toString(),
@@ -91,40 +100,51 @@ app.get("/orders", async (req, res) => {
 async function sendTelegramMessage(user, attempt = 1) {
   try {
     const token = decrypt(user.botToken);
+
     await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
       chat_id: user.chatId,
       text: user.message,
     });
+
     console.log(`✅ Message sent to ${user.chatId}`);
+
   } catch (err) {
-    console.log(`❌ ERROR attempt ${attempt} for ${user.chatId}:`, err.response?.data || err.message);
-    if (attempt < 5) setTimeout(() => sendTelegramMessage(user, attempt + 1), 10000);
+    console.log(`❌ ERROR attempt ${attempt}:`, err.message);
+
+    if (attempt < 5) {
+      setTimeout(() => sendTelegramMessage(user, attempt + 1), 10000);
+    }
   }
 }
 
 // ===================
-// 🔹 تشغيل مهمة (FIXED)
+// 🔹 تشغيل مهمة
 // ===================
 function startTask(user) {
   const key = user._id.toString();
 
-  if (tasks[key]) clearInterval(tasks[key]);
+  if (tasks.has(key)) {
+    clearInterval(tasks.get(key));
+  }
 
   sendTelegramMessage(user);
 
-  tasks[key] = setInterval(
-    () => sendTelegramMessage(user),
-    user.interval * 1000
-  );
+  const interval = setInterval(() => {
+    sendTelegramMessage(user);
+  }, user.interval * 1000);
+
+  tasks.set(key, interval);
 }
 
 // ===================
-// 🔹 saveAndStart (FIXED)
+// 🔹 saveAndStart
 // ===================
 app.post("/saveAndStart", async (req, res) => {
   if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
 
   try {
+    console.log("🔥 SAVE REQUEST:", req.body);
+
     const { userId, botToken, chatId, message, interval } = req.body;
 
     if (!userId || !botToken || !chatId || !message || !interval) {
@@ -133,7 +153,6 @@ app.post("/saveAndStart", async (req, res) => {
 
     const encryptedToken = encrypt(botToken);
 
-    // 🔥 إنشاء طلب جديد كل مرة (مش update)
     const user = await User.create({
       userId,
       botToken: encryptedToken,
@@ -142,9 +161,11 @@ app.post("/saveAndStart", async (req, res) => {
       interval
     });
 
+    console.log("✅ CREATED:", user._id);
+
     startTask(user);
 
-    res.send("✅ Started");
+    res.json(user); // 🔥 مهم: نرجع الداتا
 
   } catch (err) {
     console.log("❌ SERVER ERROR:", err);
@@ -153,16 +174,18 @@ app.post("/saveAndStart", async (req, res) => {
 });
 
 // ===================
-// 🔹 stop (FIXED)
+// 🔹 STOP
 // ===================
-app.post("/stop", async (req, res) => {
+app.post("/stop", (req, res) => {
   const { id } = req.body;
+
+  console.log("🛑 STOP:", id);
 
   if (!id) return res.status(400).send("❌ لازم id");
 
-  if (tasks[id]) {
-    clearInterval(tasks[id]);
-    delete tasks[id];
+  if (tasks.has(id)) {
+    clearInterval(tasks.get(id));
+    tasks.delete(id);
     return res.send("🛑 تم الإيقاف");
   }
 
@@ -170,10 +193,12 @@ app.post("/stop", async (req, res) => {
 });
 
 // ===================
-// 🔹 start (FIXED)
+// 🔹 START
 // ===================
 app.post("/start", async (req, res) => {
   const { id } = req.body;
+
+  console.log("▶ START:", id);
 
   if (!id) return res.status(400).send("❌ لازم id");
 
@@ -181,13 +206,6 @@ app.post("/start", async (req, res) => {
     const user = await User.findById(id);
 
     if (!user) return res.status(404).send("❌ مش موجود");
-
-    const key = user._id.toString();
-
-    if (tasks[key]) {
-      clearInterval(tasks[key]);
-      delete tasks[key];
-    }
 
     startTask(user);
 
@@ -200,10 +218,12 @@ app.post("/start", async (req, res) => {
 });
 
 // ===================
-// 🔹 deleteUser (FIXED)
+// 🔹 DELETE USER
 // ===================
 app.post("/deleteUser", async (req, res) => {
   const { userId } = req.body;
+
+  console.log("🗑 DELETE:", userId);
 
   if (!userId) return res.status(400).send("❌ لازم userId");
 
@@ -212,9 +232,10 @@ app.post("/deleteUser", async (req, res) => {
 
     users.forEach(user => {
       const key = user._id.toString();
-      if (tasks[key]) {
-        clearInterval(tasks[key]);
-        delete tasks[key];
+
+      if (tasks.has(key)) {
+        clearInterval(tasks.get(key));
+        tasks.delete(key);
       }
     });
 
@@ -229,7 +250,7 @@ app.post("/deleteUser", async (req, res) => {
 });
 
 // ===================
-// 🚀 MongoDB + Restore
+// 🚀 MongoDB
 // ===================
 mongoose.connect(process.env.MONGO_URI)
 .then(async () => {
@@ -240,11 +261,14 @@ mongoose.connect(process.env.MONGO_URI)
   console.log(`🔄 Restoring ${users.length} tasks...`);
 
   users.forEach(user => startTask(user));
+
 })
 .catch(err => console.log("❌ MongoDB Error:", err));
 
 // ===================
-// 🚀 تشغيل السيرفر
+// 🚀 SERVER
 // ===================
 const PORT = 3000;
-app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, "0.0.0.0", () =>
+  console.log(`🚀 Server running on port ${PORT}`)
+);
