@@ -12,7 +12,7 @@ app.use(express.json());
 console.log("🚀 Server starting...");
 
 // ===================
-// 🔐 التشفير
+// 🔐 ENCRYPTION
 // ===================
 const algorithm = "aes-256-ctr";
 const key = Buffer.from(process.env.SECRET_KEY, "hex");
@@ -33,69 +33,25 @@ function decrypt(hash) {
 }
 
 // ===================
-// 🧩 Model
+// MODEL
 // ===================
 const userSchema = new mongoose.Schema({
-  userId: { type: String, required: true },
-  botToken: { type: String, required: true },
-  chatId: { type: String, required: true },
-  message: { type: String, required: true },
-  interval: { type: Number, required: true }
+  userId: String,
+  botToken: String,
+  chatId: String,
+  message: String,
+  interval: Number
 }, { timestamps: true });
 
 const User = mongoose.model("User", userSchema);
 
 // ===================
-// ⏱️ Tasks (FIXED → Map)
+// TASKS
 // ===================
 const tasks = new Map();
-let isDbConnected = false;
 
 // ===================
-// 🧪 Test Route
-// ===================
-app.get("/", (req, res) => {
-  console.log("🔥 ROOT HIT");
-  res.send("✅ Server is working");
-});
-
-// ===================
-// 🔹 GET ORDERS (DEBUGGED)
-// ===================
-app.get("/orders", async (req, res) => {
-  try {
-    console.log("🔥 ORDERS HIT");
-    console.log("QUERY:", req.query);
-
-    const userId = req.query.userId;
-
-    if (!userId) {
-      console.log("❌ No userId");
-      return res.status(400).send("❌ userId required");
-    }
-
-    const users = await User.find({ userId });
-
-    console.log("FOUND ORDERS:", users.length);
-
-    const data = users.map(u => ({
-      id: u._id.toString(),
-      message: u.message,
-      intervalMinutes: Math.floor(u.interval / 60),
-      timestamp: new Date(u.createdAt).getTime(),
-      chatId: u.chatId
-    }));
-
-    res.json(data);
-
-  } catch (err) {
-    console.log("❌ GET ORDERS ERROR:", err);
-    res.status(500).send("❌ خطأ");
-  }
-});
-
-// ===================
-// 🔹 إرسال رسالة
+// SEND MESSAGE
 // ===================
 async function sendTelegramMessage(user, attempt = 1) {
   try {
@@ -106,11 +62,7 @@ async function sendTelegramMessage(user, attempt = 1) {
       text: user.message,
     });
 
-    console.log(`✅ Message sent to ${user.chatId}`);
-
   } catch (err) {
-    console.log(`❌ ERROR attempt ${attempt}:`, err.message);
-
     if (attempt < 5) {
       setTimeout(() => sendTelegramMessage(user, attempt + 1), 10000);
     }
@@ -118,7 +70,7 @@ async function sendTelegramMessage(user, attempt = 1) {
 }
 
 // ===================
-// 🔹 تشغيل مهمة
+// START TASK
 // ===================
 function startTask(user) {
   const key = user._id.toString();
@@ -137,95 +89,62 @@ function startTask(user) {
 }
 
 // ===================
-// 🔹 saveAndStart
+// SAVE + START
 // ===================
 app.post("/saveAndStart", async (req, res) => {
-  if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
-
   try {
-    console.log("🔥 SAVE REQUEST:", req.body);
-
     const { userId, botToken, chatId, message, interval } = req.body;
 
     if (!userId || !botToken || !chatId || !message || !interval) {
-      return res.status(400).send("❌ بيانات ناقصة");
+      return res.status(400).send("❌ missing data");
     }
-
-    const encryptedToken = encrypt(botToken);
 
     const user = await User.create({
       userId,
-      botToken: encryptedToken,
+      botToken: encrypt(botToken),
       chatId,
       message,
       interval
     });
 
-    console.log("✅ CREATED:", user._id);
-
     startTask(user);
 
-    res.json(user); // 🔥 مهم: نرجع الداتا
+    res.json({ id: user._id });
 
-  } catch (err) {
-    console.log("❌ SERVER ERROR:", err);
-    res.status(500).send("❌ خطأ");
+  } catch (e) {
+    res.status(500).send("error");
   }
 });
 
 // ===================
-// 🔹 STOP
+// STOP (FIXED)
 // ===================
-app.post("/stop", (req, res) => {
-  const { id } = req.body;
+app.post("/stop", async (req, res) => {
+  const { chatId } = req.body;
 
-  console.log("🛑 STOP:", id);
+  if (!chatId) return res.status(400).send("missing chatId");
 
-  if (!id) return res.status(400).send("❌ لازم id");
+  const users = await User.find({ chatId });
 
-  if (tasks.has(id)) {
-    clearInterval(tasks.get(id));
-    tasks.delete(id);
-    return res.send("🛑 تم الإيقاف");
-  }
+  users.forEach(user => {
+    const key = user._id.toString();
 
-  res.send("⚠️ لا يوجد Task");
+    if (tasks.has(key)) {
+      clearInterval(tasks.get(key));
+      tasks.delete(key);
+    }
+  });
+
+  res.send("stopped");
 });
 
 // ===================
-// 🔹 START
+// DELETE USER (FIXED NAME MATCH)
 // ===================
-app.post("/start", async (req, res) => {
-  const { id } = req.body;
-
-  console.log("▶ START:", id);
-
-  if (!id) return res.status(400).send("❌ لازم id");
-
-  try {
-    const user = await User.findById(id);
-
-    if (!user) return res.status(404).send("❌ مش موجود");
-
-    startTask(user);
-
-    res.send("▶️ Task started");
-
-  } catch (err) {
-    console.log("❌ Start Error:", err);
-    res.status(500).send("❌ خطأ");
-  }
-});
-
-// ===================
-// 🔹 DELETE USER
-// ===================
-app.post("/deleteUser", async (req, res) => {
+app.post("/deleteUserData", async (req, res) => {
   const { userId } = req.body;
 
-  console.log("🗑 DELETE:", userId);
-
-  if (!userId) return res.status(400).send("❌ لازم userId");
+  if (!userId) return res.status(400).send("missing userId");
 
   try {
     const users = await User.find({ userId });
@@ -241,34 +160,29 @@ app.post("/deleteUser", async (req, res) => {
 
     await User.deleteMany({ userId });
 
-    res.send("✅ تم حذف كل الطلبات");
+    res.send("deleted");
 
-  } catch (err) {
-    console.log("❌ Delete Error:", err);
-    res.status(500).send("❌ خطأ");
+  } catch (e) {
+    res.status(500).send("error");
   }
 });
 
 // ===================
-// 🚀 MongoDB
+// DB
 // ===================
 mongoose.connect(process.env.MONGO_URI)
 .then(async () => {
-  console.log("✅ Connected to MongoDB");
-  isDbConnected = true;
+  console.log("✅ MongoDB connected");
 
   const users = await User.find({});
-  console.log(`🔄 Restoring ${users.length} tasks...`);
-
-  users.forEach(user => startTask(user));
+  users.forEach(startTask);
 
 })
-.catch(err => console.log("❌ MongoDB Error:", err));
+.catch(console.log);
 
 // ===================
-// 🚀 SERVER
+// SERVER
 // ===================
-const PORT = 3000;
-app.listen(PORT, "0.0.0.0", () =>
-  console.log(`🚀 Server running on port ${PORT}`)
-);
+app.listen(3000, "0.0.0.0", () => {
+  console.log("🚀 running");
+});
