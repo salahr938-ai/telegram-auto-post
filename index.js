@@ -249,6 +249,42 @@ app.post("/deleteUser", async (req, res) => {
   }
 });
 
+
+
+app.post("/deleteTokenOnly", async (req, res) => {
+  const { userId } = req.body;
+  console.log("🗑️ طلب حذف التوكن للمستخدم:", userId);
+
+  if (!userId) return res.status(400).send("❌ userId missing");
+
+  try {
+    // 1. إيقاف كل المهام الشغالة في الذاكرة أولاً
+    const users = await User.find({ userId });
+    users.forEach(user => {
+      const key = user._id.toString();
+      if (tasks.has(key)) {
+        clearInterval(tasks.get(key));
+        tasks.delete(key);
+        console.log(`🛑 تم إيقاف المهمة: ${key}`);
+      }
+    });
+
+    // 2. مسح البيانات من قاعدة البيانات
+    await User.deleteMany({ userId });
+
+    res.send("✅ تم مسح التوكن والبيانات بنجاح");
+  } catch (err) {
+    console.error("❌ خطأ في الحذف:", err);
+    res.status(500).send("❌ فشل حذف البيانات");
+  }
+});
+
+
+
+
+
+
+
 // ===================
 // 🚀 MongoDB
 // ===================
