@@ -5,6 +5,22 @@ const mongoose = require("mongoose");
 const crypto = require("crypto");
 require("dotenv").config();
 
+
+// ===================
+// 🔥 FIREBASE ADMIN CONFIG
+// ===================
+const admin = require("firebase-admin");
+
+// تنبيه: ستحتاج لتحميل ملف الـ JSON الخاص بالحساب الخدمي من الفايربيس وتسميته serviceAccountKey.json وضعه بجانب هذا الملف
+const serviceAccount = require("./serviceAccountKey.json"); 
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+const firestore = admin.firestore();
+
+
 // 🔥 مهم جداً (إيقاف auto index)
 mongoose.set('autoIndex', false);
 
@@ -82,31 +98,79 @@ app.get("/", (req, res) => {
 // ===================
 // 🔹 GET ORDERS
 // ===================
-app.get("/orders", async (req, res) => {
-  try {
-    console.log("🔥 ORDERS HIT");
-    const userId = req.query.userId;
+// ===================================
+// 🤝 مسار تأكيد الإحالة ومنح البونص (اقتصادي وآمن)
+// ===================================
+app.post("/api/referral/confirm", async (req, res) => {
+  if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
 
+  try {
+    const { userId } = req.body;
     if (!userId) return res.status(400).send("❌ userId required");
 
-    const users = await User.find({ userId });
+    // 1. التحقق من حساب المستخدم في MongoDB وزيادة رصيده بـ 5000 نقطة
+    const account = await WheelUser.findOne({ userId });
+    if (!account) return res.status(404).send("❌ مستخدم العجلة غير موجود");
 
-    const data = users.map(u => ({
-      id: u._id.toString(),
-      message: u.message,
-      intervalMinutes: Math.floor(u.interval / 60),
-      timestamp: new Date(u.createdAt).getTime(),
-      chatId: u.chatId
-    }));
+    account.points += 5000;
+    await account.save();
 
-    res.json(data);
+    // 2. تحديث حالة الإحالة في الفايربيس (تم تعديل document إلى doc لـ Node.js)
+    const userFirebaseRef = firestore.collection("users").doc(userId); 
+    await userFirebaseRef.update({
+      referralStatus: "confirmed"
+    });
+
+    console.log(`✅ Referral confirmed and 5000 points added to ${userId}`);
+    res.json({ success: true, newPoints: account.points });
 
   } catch (err) {
-    console.log("❌ GET ORDERS ERROR:", err);
-    res.status(500).send("❌ خطأ");
+    console.log("❌ REFERRAL CONFIRM ERROR:", err);
+    res.status(500).send("❌ خطأ في الخادم");
   }
 });
 
+
+// ===================================
+// 🎁 مسار تقديم طلب السحب والخصم من MongoDB والتسجيل في الفايربيس
+// ===================================
+app.post("/api/wheel/withdraw", async (req, res) => {
+  if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+
+  try {
+    const { userId, points, wallet } = req.body;
+    if (!userId || !points || !wallet) return res.status(400).send("❌ بيانات ناقصة");
+
+    // 1. جلب الحساب من MongoDB للتحقق من كفاية الرصيد الحقيقي
+    const account = await WheelUser.findOne({ userId });
+    if (!account) return res.status(404).send("❌ المستخدم غير موجود");
+
+    if (account.points < points) {
+      return res.status(400).send("⚠️ رصيدك الحالي في المونجو غير كافٍ!");
+    }
+
+    // 2. خصم النقاط من المونجو وحفظ التحديث مجاناً
+    account.points -= parseInt(points);
+    await account.save();
+
+    // 3. إدراج طلب السحب في قاعدة بيانات الفايربيس بوضعية المعلق (pending)
+    const redeemRef = firestore.collection("redeem_requests").doc(); 
+    await redeemRef.set({
+      uid: userId,
+      points: parseInt(points),
+      wallet: wallet,
+      status: "pending",
+      createdAt: new Date().toISOString()
+    });
+
+    console.log(`🎁 Redeem request created for ${userId}, deducted: ${points}`);
+    res.json({ success: true, newPoints: account.points });
+
+  } catch (err) {
+    console.log("❌ WITHDRAW ERROR:", err);
+    res.status(500).send("❌ خطأ في الخادم");
+  }
+});
 // ===================
 // 🔹 إرسال رسالة
 // ===================
