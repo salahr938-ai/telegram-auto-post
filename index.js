@@ -67,7 +67,10 @@ const User = mongoose.model("User", userSchema);
 //كود خاص بالنقاط 
 const wheelSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
+  referralCode: { type: String, unique: true }, // 👈 ضروري: الكود الخاص بالمستخدم
+  referredBy: { type: String, default: "" },    // 👈 ضروري: كود الشخص الذي دعاه
   points: { type: Number, default: 0 },
+  referralStatus: { type: String, default: "pending" }, // ✅ أضفنا هذا الحقل
   spinsLeft: { type: Number, default: 0 },
   adsLeft: { type: Number, default: 5 },
   lastPrize: { type: String, default: "0" },
@@ -77,7 +80,9 @@ const wheelSchema = new mongoose.Schema({
 const WheelUser = mongoose.model("WheelUser", wheelSchema);
 
 
-
+function generateReferralCode(userId) {
+    return userId.substring(0, 6).toUpperCase() + Math.floor(1000 + Math.random() * 9000);
+}
 
 
 
@@ -99,8 +104,10 @@ app.get("/", (req, res) => {
 // 🔹 GET ORDERS
 // ===================
 // ===================================
-// 🤝 مسار تأكيد الإحالة ومنح البونص (اقتصادي وآمن)
+
+
 // ===================================
+// 🎁 مسار تقديم طلب السحب والخصم من MongoDB والتسجيل في الفايربيس
 app.post("/api/referral/confirm", async (req, res) => {
   if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
 
@@ -108,69 +115,77 @@ app.post("/api/referral/confirm", async (req, res) => {
     const { userId } = req.body;
     if (!userId) return res.status(400).send("❌ userId required");
 
-    // 1. التحقق من حساب المستخدم في MongoDB وزيادة رصيده بـ 5000 نقطة
-    const account = await WheelUser.findOne({ userId });
-    if (!account) return res.status(404).send("❌ مستخدم العجلة غير موجود");
+    // 1. جلب بيانات الشخص المدعو
+    const user = await WheelUser.findOne({ userId });
+    if (!user || user.referralStatus === "confirmed") return res.status(400).send("❌ الحالة غير صالحة");
 
-    account.points += 5000;
-    await account.save();
+    // 2. تحديث نقاط المدعو
+    user.points += 5000;
+    user.referralStatus = "confirmed";
+    await user.save();
 
-    // 2. تحديث حالة الإحالة في الفايربيس (تم تعديل document إلى doc لـ Node.js)
-    const userFirebaseRef = firestore.collection("users").doc(userId); 
-    await userFirebaseRef.update({
-      referralStatus: "confirmed"
-    });
-
-    console.log(`✅ Referral confirmed and 5000 points added to ${userId}`);
-    res.json({ success: true, newPoints: account.points });
-
-  } catch (err) {
-    console.log("❌ REFERRAL CONFIRM ERROR:", err);
-    res.status(500).send("❌ خطأ في الخادم");
-  }
-});
-
-
-// ===================================
-// 🎁 مسار تقديم طلب السحب والخصم من MongoDB والتسجيل في الفايربيس
-// ===================================
-app.post("/api/wheel/withdraw", async (req, res) => {
-  if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
-
-  try {
-    const { userId, points, wallet } = req.body;
-    if (!userId || !points || !wallet) return res.status(400).send("❌ بيانات ناقصة");
-
-    // 1. جلب الحساب من MongoDB للتحقق من كفاية الرصيد الحقيقي
-    const account = await WheelUser.findOne({ userId });
-    if (!account) return res.status(404).send("❌ المستخدم غير موجود");
-
-    if (account.points < points) {
-      return res.status(400).send("⚠️ رصيدك الحالي في المونجو غير كافٍ!");
+    // 3. منح مكافأة للشخص الذي قام بالدعوة (إذا وجد)
+    // ملاحظة: يجب أن يكون لديك حقل referralCode في الـ Schema الخاص بك
+    if (user.referredBy) {
+      const inviter = await WheelUser.findOne({ referralCode: user.referredBy });
+      if (inviter) {
+        inviter.points += 5000;
+        await inviter.save();
+        console.log(`🎁 Bonus awarded to inviter: ${inviter.userId}`);
+      }
     }
 
-    // 2. خصم النقاط من المونجو وحفظ التحديث مجاناً
-    account.points -= parseInt(points);
-    await account.save();
+    // 4. تحديث الفايربيس (كمرجع إداري فقط)
+    await firestore.collection("users").doc(userId).update({ referralStatus: "confirmed" });
 
-    // 3. إدراج طلب السحب في قاعدة بيانات الفايربيس بوضعية المعلق (pending)
-    const redeemRef = firestore.collection("redeem_requests").doc(); 
-    await redeemRef.set({
-      uid: userId,
-      points: parseInt(points),
-      wallet: wallet,
-      status: "pending",
-      createdAt: new Date().toISOString()
-    });
-
-    console.log(`🎁 Redeem request created for ${userId}, deducted: ${points}`);
-    res.json({ success: true, newPoints: account.points });
-
+    res.json({ success: true, newPoints: user.points });
   } catch (err) {
-    console.log("❌ WITHDRAW ERROR:", err);
+    console.log("❌ REFERRAL ERROR:", err);
     res.status(500).send("❌ خطأ في الخادم");
   }
 });
+
+
+
+
+// ===================================
+// 📢 مسار تسجيل الإحالة الجديد (يتم استدعاؤه من التطبيق عند أول فتح)
+// ===================================
+app.post("/api/referral/register", async (req, res) => {
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+
+    try {
+        const { userId, referrerCode } = req.body;
+        
+        if (!userId || !referrerCode) {
+            return res.status(400).send("❌ بيانات ناقصة");
+        }
+
+        // 1. نبحث عن المستخدم في قاعدة البيانات
+        const user = await WheelUser.findOne({ userId });
+        
+        // 2. إذا كان موجوداً ولم يتم تسجيل "داعي" له من قبل
+        if (user && (!user.referredBy || user.referredBy === "")) {
+            user.referredBy = referrerCode;
+            await user.save();
+            console.log(`🔗 Referral registered: ${userId} invited by ${referrerCode}`);
+            res.json({ success: true, message: "تم تسجيل الإحالة بنجاح" });
+        } else {
+            res.status(400).send("❌ الإحالة مسجلة مسبقاً أو المستخدم غير موجود");
+        }
+    } catch (err) {
+        console.error("❌ REGISTER REFERRAL ERROR:", err);
+        res.status(500).send("❌ خطأ في السيرفر");
+    }
+});
+
+
+
+
+
+
+
+
 // ===================
 // 🔹 إرسال رسالة
 // ===================
@@ -251,34 +266,46 @@ app.post("/saveAndStart", async (req, res) => {
   }
 });
 
+
+
+
+
+
+
 // ===================================
 // 🎡 مسارات العجلة والنقاط (LUCKY WHEEL)
 // ===================================
 
 app.get("/api/wheel/status", async (req, res) => {
-  if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
-  
-  try {
-    const { userId } = req.query;
-    if (!userId) return res.status(400).send("❌ userId required");
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+    
+    try {
+        const { userId } = req.query;
+        if (!userId) return res.status(400).send("❌ userId required");
 
-    let account = await WheelUser.findOne({ userId });
+        let account = await WheelUser.findOne({ userId });
 
-    if (!account) {
-      account = await WheelUser.create({ userId, spinsLeft: 3 }); 
+        if (!account) {
+            // هنا نستخدم الآلة التي صنعناها في الخطوة 1
+            account = await WheelUser.create({ 
+                userId, 
+                spinsLeft: 3,
+                referralCode: generateReferralCode(userId) 
+            }); 
+        }
+
+        // هذا الجزء للتأكد من إعادة ضبط الإعلانات كل يوم
+        if (new Date() >= account.resetTime) {
+            account.adsLeft = 5;
+            account.resetTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
+            await account.save();
+        }
+
+        res.json(account);
+    } catch (err) {
+        console.log("❌ GET WHEEL ERROR:", err);
+        res.status(500).send("❌ خطأ");
     }
-
-    if (new Date() >= account.resetTime) {
-      account.adsLeft = 5;
-      account.resetTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      await account.save();
-    }
-
-    res.json(account);
-  } catch (err) {
-    console.log("❌ GET WHEEL ERROR:", err);
-    res.status(500).send("❌ خطأ");
-  }
 });
 
 app.post("/api/wheel/spin", async (req, res) => {
