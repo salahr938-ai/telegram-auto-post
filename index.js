@@ -67,10 +67,10 @@ const User = mongoose.model("User", userSchema);
 //كود خاص بالنقاط 
 const wheelSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
-  referralCode: { type: String, unique: true }, // 👈 ضروري: الكود الخاص بالمستخدم
-  referredBy: { type: String, default: "" },    // 👈 ضروري: كود الشخص الذي دعاه
+  referralCode: { type: String, unique: true },          // الكود الخاص بالمستخدم
+  referredBy: { type: String, default: "" },             // 👈 هكذا الاسم الصحيح (الشخص لي دعاه)
   points: { type: Number, default: 0 },
-  referralStatus: { type: String, default: "pending" }, // ✅ أضفنا هذا الحقل
+  referralStatus: { type: String, default: "none" },      // 👈 الحالة الافتراضية الصحيحة "none"
   spinsLeft: { type: Number, default: 0 },
   adsLeft: { type: Number, default: 5 },
   lastPrize: { type: String, default: "0" },
@@ -91,6 +91,8 @@ function generateReferralCode(userId) {
 // ===================
 const tasks = new Map();
 let isDbConnected = false;
+mongoose.connection.on("connected", () => { isDbConnected = true; });
+mongoose.connection.on("disconnected", () => { isDbConnected = false; });
 
 // ===================
 // 🧪 Test Route
@@ -106,8 +108,31 @@ app.get("/", (req, res) => {
 // ===================================
 
 
+
+app.get("/orders", async (req, res) => {
+    try {
+        const { userId } = req.query;
+        if (!userId) return res.status(400).send("❌ userId missing");
+        
+        const userOrders = await User.find({ userId });
+        res.json(userOrders);
+    } catch (err) {
+        console.error("❌ GET ORDERS ERROR:", err); // يطبع الخطأ في الـ Terminal لو صرا مشكل
+        res.status(500).send("خطأ في الخادم");
+    }
+});
+
+
+
+
+
+
+
+
+
 // ===================================
 // 🎁 مسار تقديم طلب السحب والخصم من MongoDB والتسجيل في الفايربيس
+// 🎁 مسار تقديم طلب السحب والخصم
 app.post("/api/referral/confirm", async (req, res) => {
   if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
 
@@ -115,28 +140,36 @@ app.post("/api/referral/confirm", async (req, res) => {
     const { userId } = req.body;
     if (!userId) return res.status(400).send("❌ userId required");
 
-    // 1. جلب بيانات الشخص المدعو
+    // 1. جلب بيانات المستخدم أولاً من قاعدة البيانات
     const user = await WheelUser.findOne({ userId });
-    if (!user || user.referralStatus === "confirmed") return res.status(400).send("❌ الحالة غير صالحة");
 
-    // 2. تحديث نقاط المدعو
+    // 2. التحقق من وجود المستخدم
+    if (!user) return res.status(404).send("❌ المستخدم غير موجود");
+    
+    // 3. 🛑 شرط الحماية: يجب أن يكون لديه "داعي" (referredBy) وحالته "pending"
+    if (!user.referredBy || user.referralStatus !== "pending") {
+       return res.status(400).send("❌ لا يمكنك التحصيل: إما لا توجد دعوة أو تم التحصيل مسبقاً");
+    }
+
+    // 4. تحديث نقاط المدعو
     user.points += 5000;
     user.referralStatus = "confirmed";
     await user.save();
 
-    // 3. منح مكافأة للشخص الذي قام بالدعوة (إذا وجد)
-    // ملاحظة: يجب أن يكون لديك حقل referralCode في الـ Schema الخاص بك
-    if (user.referredBy) {
-      const inviter = await WheelUser.findOne({ referralCode: user.referredBy });
-      if (inviter) {
-        inviter.points += 5000;
-        await inviter.save();
-        console.log(`🎁 Bonus awarded to inviter: ${inviter.userId}`);
-      }
+    // 5. منح مكافأة للشخص الذي قام بالدعوة
+    const inviter = await WheelUser.findOne({ referralCode: user.referredBy });
+    if (inviter) {
+      inviter.points += 5000;
+      await inviter.save();
+      console.log(`🎁 Bonus awarded to inviter: ${inviter.userId}`);
     }
 
-    // 4. تحديث الفايربيس (كمرجع إداري فقط)
-    await firestore.collection("users").doc(userId).update({ referralStatus: "confirmed" });
+    // 6. تحديث الفايربيس (اختياري)
+    try {
+        await firestore.collection("users").doc(userId).update({ referralStatus: "confirmed" });
+    } catch (e) {
+        console.log("⚠️ Firebase update skipped (user not in FB)");
+    }
 
     res.json({ success: true, newPoints: user.points });
   } catch (err) {
@@ -144,9 +177,6 @@ app.post("/api/referral/confirm", async (req, res) => {
     res.status(500).send("❌ خطأ في الخادم");
   }
 });
-
-
-
 
 // ===================================
 // 📢 مسار تسجيل الإحالة الجديد (يتم استدعاؤه من التطبيق عند أول فتح)
@@ -161,12 +191,11 @@ app.post("/api/referral/register", async (req, res) => {
             return res.status(400).send("❌ بيانات ناقصة");
         }
 
-        // 1. نبحث عن المستخدم في قاعدة البيانات
         const user = await WheelUser.findOne({ userId });
         
-        // 2. إذا كان موجوداً ولم يتم تسجيل "داعي" له من قبل
         if (user && (!user.referredBy || user.referredBy === "")) {
             user.referredBy = referrerCode;
+            user.referralStatus = "pending"; // 👈 تفعيل الحالة هنا لكي يظهر زر التحصيل بالأندرويد!
             await user.save();
             console.log(`🔗 Referral registered: ${userId} invited by ${referrerCode}`);
             res.json({ success: true, message: "تم تسجيل الإحالة بنجاح" });
@@ -178,7 +207,6 @@ app.post("/api/referral/register", async (req, res) => {
         res.status(500).send("❌ خطأ في السيرفر");
     }
 });
-
 
 
 
@@ -285,15 +313,32 @@ app.get("/api/wheel/status", async (req, res) => {
 
         let account = await WheelUser.findOne({ userId });
 
-        if (!account) {
-            // هنا نستخدم الآلة التي صنعناها في الخطوة 1
+      if (!account) {
+            // 1. نضع كوداً احتياطياً تحسباً لأي مشكلة في الاتصال بالفايربيس
+            let finalCode = generateReferralCode(userId); 
+
+            try {
+                // 2. السيرفر يتصل بالفايربيس ليقرأ الوثيقة التي أنشأها الأندرويد في LoginActivity
+                const userDoc = await firestore.collection("users").doc(userId).get();
+                
+                // 3. إذا وجدنا الحساب في الفايربيس، نأخذ الكود الأصلي (referralCode) الذي خلقه الأندرويد
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    if (userData.referralCode) {
+                        finalCode = userData.referralCode; // 👈 تم جلب الكود الصحيح والموحد!
+                    }
+                }
+            } catch (fbErr) {
+                console.log("⚠️ تعذر جلب الكود من الفايربيس، سيتم استخدام الكود الاحتياطي بالسيرفر");
+            }
+
+            // 4. الآن ننشئ الحساب في المونجو دي بي بالكود الموحد والصحيح
             account = await WheelUser.create({ 
                 userId, 
                 spinsLeft: 3,
-                referralCode: generateReferralCode(userId) 
+                referralCode: finalCode // هكذا أصبح الكود في المونجو مطابقاً تماماً لكود الفايربيس
             }); 
         }
-
         // هذا الجزء للتأكد من إعادة ضبط الإعلانات كل يوم
         if (new Date() >= account.resetTime) {
             account.adsLeft = 5;
@@ -377,13 +422,16 @@ app.post("/stop", (req, res) => {
 
   if (!id) return res.status(400).send("❌ لازم id");
 
-  if (tasks.has(id)) {
-    clearInterval(tasks.get(id));
-    tasks.delete(id);
-    return res.send("🛑 تم الإيقاف");
+  // تحويل المعرف إلى نص لضمان المطابقة مع مفاتيح الخريطة
+  const taskKey = id.toString();
+
+  if (tasks.has(taskKey)) {
+    clearInterval(tasks.get(taskKey));
+    tasks.delete(taskKey);
+    return res.send("🛑 تم الإيقاف بنجاح");
   }
 
-  res.send("⚠️ لا يوجد Task");
+  res.send("⚠️ لا توجد مهمة نشطة حالياً لهذا المعرّف");
 });
 
 // ===================
@@ -396,47 +444,18 @@ app.post("/start", async (req, res) => {
 
   try {
     const user = await User.findById(id);
-
-    if (!user) return res.status(404).send("❌ مش موجود");
+    if (!user) return res.status(404).send("❌ الطلب غير موجود في قاعدة البيانات");
 
     startTask(user);
-
-    res.send("▶️ Task started");
+    res.send("▶️ تم تشغيل المهمة بنجاح");
 
   } catch (err) {
     console.log("❌ Start Error:", err);
-    res.status(500).send("❌ خطأ");
+    res.status(500).send("❌ خطأ في السيرفر");
   }
 });
 
-// ===================
-// 🔹 DELETE USER
-// ===================
-app.post("/deleteUser", async (req, res) => {
-  const { userId } = req.body;
 
-  if (!userId) return res.status(400).send("❌ لازم userId");
-
-  try {
-    const users = await User.find({ userId });
-
-    users.forEach(user => {
-      const key = user._id.toString();
-      if (tasks.has(key)) {
-        clearInterval(tasks.get(key));
-        tasks.delete(key);
-      }
-    });
-
-    await User.deleteMany({ userId });
-
-    res.send("✅ تم حذف كل الطلبات");
-
-  } catch (err) {
-    console.log("❌ Delete Error:", err);
-    res.status(500).send("❌ خطأ");
-  }
-});
 
 // ===================
 // 🔹 DELETE TOKEN ONLY
@@ -476,23 +495,26 @@ app.post("/deleteSingleOrder", async (req, res) => {
   if (!id) return res.status(400).send("❌ id missing");
 
   try {
-    if (tasks.has(id)) {
-      clearInterval(tasks.get(id));
-      tasks.delete(id);
+    const taskKey = id.toString(); // تحويله لنص لضمان المطابقة في الـ Map
+
+    if (tasks.has(taskKey)) {
+      clearInterval(tasks.get(taskKey));
+      tasks.delete(taskKey);
     }
 
     const result = await User.findByIdAndDelete(id);
 
     if (result) {
-      res.send("✅ تم حذف البطاقة");
+      res.send("✅ تم حذف البطاقة والمهمة بنجاح");
     } else {
       res.status(404).send("⚠️ غير موجود");
     }
   } catch (err) {
-    console.error("❌ Error:", err);
-    res.status(500).send("❌ فشل");
+    console.error("❌ Delete Single Order Error:", err);
+    res.status(500).send("❌ خطأ في السيرفر أثناء الحذف");
   }
 });
+
 
 // ===================
 // 🚀 MongoDB
