@@ -214,6 +214,13 @@ app.post("/api/referral/register", async (req, res) => {
 
 
 
+
+
+
+
+
+
+
 // ===================
 // 🔹 إرسال رسالة
 // ===================
@@ -408,6 +415,71 @@ app.post("/api/wheel/watch-ad", async (req, res) => {
     res.status(500).send("❌ خطأ");
   }
 });
+
+// ===================================
+// 🎁 مسار تقديم طلب السحب والخصم من MongoDB والتسجيل في الفايربيس
+// ===================================
+app.post("/api/wheel/withdraw", async (req, res) => {
+    if (!isDbConnected) return res.status(503).send("⏳ قاعدة البيانات غير جاهزة");
+
+    try {
+        const { userId, points, wallet } = req.body;
+
+        // 1. التحقق من وصول البيانات الأساسية من الأندرويد
+        if (!userId || !points || !wallet) {
+            return res.status(400).send("❌ بيانات الطلب ناقصة");
+        }
+
+        const requestedPoints = parseInt(points);
+        if (isNaN(requestedPoints) || requestedPoints <= 0) {
+            return res.status(400).send("❌ كمية النقاط المطلوبة غير صالحة");
+        }
+
+        // 2. البحث عن الحساب في قاعدة البيانات (MongoDB)
+        const account = await WheelUser.findOne({ userId });
+        if (!account) {
+            return res.status(404).send("❌ الحساب غير موجود في السيرفر");
+        }
+
+        // 3. الفحص الأمني: التأكد من أن رصيد النقاط يكفي السحب
+        if (account.points < requestedPoints) {
+            return res.status(400).send("❌ رصيد نقاطك الحالي في السيرفر غير كافٍ!");
+        }
+
+        // 4. الخصم وحفظ التحديثات في المونجو دي بي
+        account.points -= requestedPoints;
+        await account.save();
+
+        // 5. تسجيل الطلب في الفايربيس (Firestore) لكي يظهر في الإدارة وسجل الطلبات
+        try {
+            await firestore.collection("redeem_requests").add({
+                userId: userId,
+                points: requestedPoints,
+                wallet: wallet,
+                status: "pending", // معلق حتى تتم مراجعته يدوياً من قبلك
+                createdAt: new Date()
+            });
+            console.log(`✅ Withdraw request logged in Firebase for user: ${userId}`);
+        } catch (fbErr) {
+            console.log("⚠️ تم خصم النقاط بنجاح ولكن تعذر التسجيل بالفايربيس:", fbErr.message);
+        }
+
+        // 6. الرد على الأندرويد بالنجاح وإرسال الرصيد الجديد المتبقي
+        res.json({ 
+            success: true, 
+            newPoints: account.points,
+            message: "تم الخصم وتسجيل طلب السحب بنجاح" 
+        });
+
+    } catch (err) {
+        console.error("❌ WITHDRAW ROUTE ERROR:", err);
+        res.status(500).send("❌ خطأ داخلي في السيرفر أثناء معالجة السحب");
+    }
+});
+
+
+
+
 
 
 
