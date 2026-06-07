@@ -470,7 +470,6 @@ app.post("/api/wheel/withdraw", async (req, res) => {
             newPoints: account.points,
             message: "تم الخصم وتسجيل طلب السحب بنجاح" 
         });
-
     } catch (err) {
         console.error("❌ WITHDRAW ROUTE ERROR:", err);
         res.status(500).send("❌ خطأ داخلي في السيرفر أثناء معالجة السحب");
@@ -480,7 +479,52 @@ app.post("/api/wheel/withdraw", async (req, res) => {
 
 
 
+// ... (هذا هو المكان الصحيح لوضع المسار)
 
+// ===================================
+// ❌ مسار رفض طلب السحب وإرجاع النقاط في MongoDB
+// ===================================
+app.post("/api/wheel/reject", async (req, res) => {
+    if (!isDbConnected) return res.status(503).send("⏳ قاعدة البيانات غير جاهزة");
+
+    try {
+        const { requestId, userId, points } = req.body;
+
+        if (!requestId || !userId || !points) {
+            return res.status(400).send("❌ بيانات الرفض ناقصة");
+        }
+
+        const pointsToReturn = parseInt(points);
+
+        // 1. إعادة النقاط للمستخدم في MongoDB
+        const account = await WheelUser.findOne({ userId });
+        if (account) {
+            account.points += pointsToReturn;
+            await account.save();
+            console.log(`🔄 Returned ${pointsToReturn} points to MongoDB user: ${userId}`);
+        }
+
+        // 2. تحديث حالة الطلب في الفايربيس إلى مرفوض
+        try {
+            await firestore.collection("redeem_requests").doc(requestId).update({
+                status: "rejected"
+            });
+            console.log(`✅ Request ${requestId} marked as rejected`);
+        } catch (fbErr) {
+            console.error("❌ فشل تحديث الفايربيس:", fbErr.message);
+        }
+
+        res.json({ success: true, message: "تم الرفض وإرجاع النقاط بنجاح" });
+
+    } catch (err) {
+        console.error("❌ REJECT ROUTE ERROR:", err);
+        res.status(500).send("❌ خطأ داخلي في السيرفر");
+    }
+});
+
+// ===================
+// 🔹 STOP (أكمل من هنا بقية الكود)
+// ===================
 
 
 
