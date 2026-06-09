@@ -522,6 +522,29 @@ app.post("/api/wheel/reject", async (req, res) => {
     }
 });
 
+
+app.post("/api/user/init", async (req, res) => {
+    const { userId } = req.body;
+    try {
+        let user = await WheelUser.findOne({ userId });
+        if (!user) {
+            // إنشاء المستخدم في MongoDB فوراً وبقيم افتراضية
+            await WheelUser.create({ 
+                userId: userId, 
+                points: 0, 
+                spinsLeft: 3 // أو القيمة الابتدائية عندك
+            });
+            console.log("تم إنشاء مستخدم جديد في MongoDB: " + userId);
+        }
+        res.status(200).send("User Initialized");
+    } catch (err) {
+        res.status(500).send("Error");
+    }
+});
+
+
+
+
 // ===================
 // 🔹 STOP (أكمل من هنا بقية الكود)
 // ===================
