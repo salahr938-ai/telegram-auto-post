@@ -9,21 +9,19 @@ require("dotenv").config();
 // ===================
 // 🔥 FIREBASE ADMIN CONFIG
 // ===================
-const admin = require("firebase-admin");
+// ===================
+// 🔥 FIREBASE ADMIN CONFIG
+// ===================
+const { initializeApp, cert } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
 
-// تنبيه: ستحتاج لتحميل ملف الـ JSON الخاص بالحساب الخدمي من الفايربيس وتسميته serviceAccountKey.json وضعه بجانب هذا الملف
-const serviceAccount = require("./serviceAccountKey.json"); 
+const serviceAccount = require("./serviceAccountKey.json");
 
-console.log("Firebase Admin:", admin);
-console.log("Credential:", admin.credential);
-console.log("ServiceAccount loaded:", !!serviceAccount);
-
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+initializeApp({
+  credential: cert(serviceAccount)
 });
 
-const firestore = admin.firestore();
+const firestore = getFirestore();
 
 
 // 🔥 مهم جداً (إيقاف auto index)
