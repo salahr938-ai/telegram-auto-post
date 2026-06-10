@@ -83,6 +83,38 @@ const wheelSchema = new mongoose.Schema({
 const WheelUser = mongoose.model("WheelUser", wheelSchema);
 
 
+
+
+
+
+// كود خاص بنظام الدخول اليومي التتابعي
+const dailyCheckInSchema = new mongoose.Schema({
+  userId: { type: String, required: true, unique: true },
+  lastCheckInTime: { type: Date, default: null }, // آخر وقت ضغط فيه على "تحصيل"
+  streakDays: { type: Number, default: 0 }        // عدد الأيام المتتالية المحصلة (من 0 إلى 7)
+}, { timestamps: true });
+
+const DailyCheckIn = mongoose.model("DailyCheckIn", dailyCheckInSchema);
+
+// مصفوفة الجوائز الثابتة للأيام السبعة
+const DAILY_REWARDS = [
+  { dayNumber: 1, points: 1000 },
+  { dayNumber: 2, points: 2000 },
+  { dayNumber: 3, points: 3000 },
+  { dayNumber: 4, points: 4000 },
+  { dayNumber: 5, points: 5000 },
+  { dayNumber: 6, points: 6000 },
+  { dayNumber: 7, points: 10000 } // جائزة كبرى
+];
+
+
+
+
+
+
+
+
+
 function generateReferralCode(userId) {
     return userId.substring(0, 6).toUpperCase() + Math.floor(1000 + Math.random() * 9000);
 }
@@ -548,9 +580,142 @@ app.post("/api/user/init", async (req, res) => {
 
 
 
-// ===================
-// 🔹 STOP (أكمل من هنا بقية الكود)
-// ===================
+
+
+
+
+// ===================================
+// 📅 1. مسار جلب حالة الأيام السبعة العمودية (GET)
+// ===================================
+app.get("/api/daily/status-vertical", async (req, res) => {
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+
+    try {
+        const { userId } = req.query;
+        if (!userId) return res.status(400).send("❌ userId required");
+
+        let progress = await DailyCheckIn.findOne({ userId });
+        if (!progress) {
+            progress = await DailyCheckIn.create({ userId, streakDays: 0, lastCheckInTime: null });
+        }
+
+        const now = new Date();
+        let streak = progress.streakDays;
+
+        // فحص التصفير: إذا غاب المستخدم أكثر من 48 ساعة منذ آخر تحصيل، يصفر العداد
+        if (progress.lastCheckInTime) {
+            const hoursSinceLastCheckIn = (now - new Date(progress.lastCheckInTime)) / (1000 * 60 * 60);
+            if (hoursSinceLastCheckIn >= 48) {
+                streak = 0;
+                progress.streakDays = 0;
+                progress.lastCheckInTime = null;
+                await progress.save();
+            }
+        }
+
+        // حساب متى سيكون اليوم التالي متاحاً (وقت آخر تحصيل + 24 ساعة)
+        let nextAvailableTime = 0;
+        if (progress.lastCheckInTime) {
+            nextAvailableTime = new Date(progress.lastCheckInTime).getTime() + (24 * 60 * 60 * 1000);
+        }
+
+        // بناء قائمة الأيام السبعة وإرسالها للأندرويد
+        const finalDaysList = DAILY_REWARDS.map((reward) => {
+            let isClaimed = reward.dayNumber <= streak; 
+            let isAvailable = false;
+            let isLocked = true;
+            let availableAtTimestamp = 0;
+
+            // تحديد اليوم النشط الحالي الذي ينتظره المستخدم
+            if (reward.dayNumber === streak + 1 && streak < 7) {
+                isLocked = false;
+                availableAtTimestamp = nextAvailableTime;
+                // يكون متاحاً فوراً إذا لم يسجل من قبل أو انتهت الـ 24 ساعة
+                if (now.getTime() >= nextAvailableTime) {
+                    isAvailable = true;
+                }
+            }
+
+            return {
+                dayNumber: reward.dayNumber,
+                points: reward.points,
+                isClaimed: isClaimed,
+                isLocked: isLocked,
+                availableAtTimestamp: availableAtTimestamp
+            };
+        });
+
+        res.json(finalDaysList);
+
+    } catch (err) {
+        console.error("❌ GET DAILY STATUS ERROR:", err);
+        res.status(500).send("❌ خطأ في السيرفر");
+    }
+});
+
+// ===================================
+// 💰 2. مسار تحصيل المكافأة وتحديث الرصيد في MongoDB (POST)
+// ===================================
+app.post("/api/daily/claim-vertical", async (req, res) => {
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+
+    try {
+        const { userId, dayNumber } = req.body;
+        if (!userId || !dayNumber) return res.status(400).send("❌ بيانات ناقصة");
+
+        let progress = await DailyCheckIn.findOne({ userId });
+        if (!progress) return res.status(404).send("❌ سجل المستخدم غير موجود");
+
+        const now = new Date();
+        const expectedNextDay = progress.streakDays + 1;
+
+        // حماية 1: التأكد من أن المستخدم يطلب اليوم الصحيح تتابعياً
+        if (parseInt(dayNumber) !== expectedNextDay) {
+            return res.status(400).send("❌ طلب غير صالح، هذا اليوم ليس دورك حالياً");
+        }
+
+        // حماية 2: التأكد من مرور 24 ساعة على آخر تحصيل
+        if (progress.lastCheckInTime) {
+            const nextAvailableTime = new Date(progress.lastCheckInTime).getTime() + (24 * 60 * 60 * 1000);
+            if (now.getTime() < nextAvailableTime) {
+                return res.status(400).send("⚠️ لم تمر 24 ساعة بعد!");
+            }
+        }
+
+        // جلب قيمة الجائزة المحددة لهذا اليوم
+        const rewardConfig = DAILY_REWARDS.find(r => r.dayNumber === expectedNextDay);
+        if (!rewardConfig) return res.status(400).send("❌ خطأ في إعدادات الأيام");
+
+        // 1. تحديث تقدم الدخول اليومي
+        progress.streakDays = expectedNextDay === 7 ? 0 : expectedNextDay; // إذا وصل لليوم 7، يصفر العداد للأسبوع القادم
+        progress.lastCheckInTime = now;
+        await progress.save();
+
+        // 2. إضافة النقاط مباشرة إلى حساب المستخدم في جدول WheelUser
+        const account = await WheelUser.findOne({ userId });
+        if (account) {
+            account.points += rewardConfig.points;
+            await account.save();
+            console.log(`🎰 Daily Reward Added: +${rewardConfig.points} points to user ${userId}`);
+            res.json({ success: true, newPoints: account.points });
+        } else {
+            res.status(404).send("❌ لم يتم العثور على جدول نقاط المستخدم الرئيسي");
+        }
+
+    } catch (err) {
+        console.error("❌ CLAIM DAILY ERROR:", err);
+        res.status(500).send("❌ خطأ داخلي في السيرفر");
+    }
+});
+
+
+
+
+
+
+
+
+
 
 
 
