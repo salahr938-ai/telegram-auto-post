@@ -571,6 +571,23 @@ app.post("/api/user/init", async (req, res) => {
             });
             console.log("تم إنشاء مستخدم جديد في MongoDB: " + userId);
         }
+
+
+// 🔥 الإضافة الاحترافية والذكية التي اقترحتها لنظام الدخول اليومي
+        await DailyCheckIn.findOneAndUpdate(
+          { userId },
+          { userId },
+          { upsert: true, new: true }
+        );
+        console.log("🔄 تم فحص / تهيئة سجل الدخول اليومي بأمان للمستخدم: " + userId);
+
+
+
+
+
+
+
+
         res.status(200).send("User Initialized");
     } catch (err) {
         res.status(500).send("Error");
@@ -587,131 +604,97 @@ app.post("/api/user/init", async (req, res) => {
 // ===================================
 // 📅 1. مسار جلب حالة الأيام السبعة العمودية (GET)
 // ===================================
-app.get("/api/daily/status-vertical", async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
-
-    try {
-        const { userId } = req.query;
-        if (!userId) return res.status(400).send("❌ userId required");
-
-        let progress = await DailyCheckIn.findOne({ userId });
-        if (!progress) {
-            progress = await DailyCheckIn.create({ userId, streakDays: 0, lastCheckInTime: null });
-        }
-
-        const now = new Date();
-        let streak = progress.streakDays;
-
-        // فحص التصفير: إذا غاب المستخدم أكثر من 48 ساعة منذ آخر تحصيل، يصفر العداد
-        if (progress.lastCheckInTime) {
-            const hoursSinceLastCheckIn = (now - new Date(progress.lastCheckInTime)) / (1000 * 60 * 60);
-            if (hoursSinceLastCheckIn >= 48) {
-                streak = 0;
-                progress.streakDays = 0;
-                progress.lastCheckInTime = null;
-                await progress.save();
-            }
-        }
-
-        // حساب متى سيكون اليوم التالي متاحاً (وقت آخر تحصيل + 24 ساعة)
-        let nextAvailableTime = 0;
-        if (progress.lastCheckInTime) {
-            nextAvailableTime = new Date(progress.lastCheckInTime).getTime() + (24 * 60 * 60 * 1000);
-        }
-
-        // بناء قائمة الأيام السبعة وإرسالها للأندرويد
-        const finalDaysList = DAILY_REWARDS.map((reward) => {
-            let isClaimed = reward.dayNumber <= streak; 
-            let isAvailable = false;
-            let isLocked = true;
-            let availableAtTimestamp = 0;
-
-            // تحديد اليوم النشط الحالي الذي ينتظره المستخدم
-            if (reward.dayNumber === streak + 1 && streak < 7) {
-                isLocked = false;
-                availableAtTimestamp = nextAvailableTime;
-                // يكون متاحاً فوراً إذا لم يسجل من قبل أو انتهت الـ 24 ساعة
-                if (now.getTime() >= nextAvailableTime) {
-                    isAvailable = true;
-                }
-            }
-
-            return {
-                dayNumber: reward.dayNumber,
-                points: reward.points,
-                isClaimed: isClaimed,
-                isLocked: isLocked,
-                availableAtTimestamp: availableAtTimestamp
-            };
-        });
-
-        res.json(finalDaysList);
-
-    } catch (err) {
-        console.error("❌ GET DAILY STATUS ERROR:", err);
-        res.status(500).send("❌ خطأ في السيرفر");
-    }
-});
-
-// ===================================
-// 💰 2. مسار تحصيل المكافأة وتحديث الرصيد في MongoDB (POST)
-// ===================================
 app.post("/api/daily/claim-vertical", async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+    if (!isDbConnected) {
+        return res.status(503).send("⏳ DB not ready");
+    }
 
     try {
-        const { userId, dayNumber } = req.body;
-        if (!userId || !dayNumber) return res.status(400).send("❌ بيانات ناقصة");
+        const {
+            userId,
+            dayNumber,
+            rewardType = "normal"
+        } = req.body;
+
+        if (!userId || !dayNumber) {
+            return res.status(400).send("❌ بيانات ناقصة");
+        }
 
         let progress = await DailyCheckIn.findOne({ userId });
-        if (!progress) return res.status(404).send("❌ سجل المستخدم غير موجود");
+
+        if (!progress) {
+            return res.status(404).send("❌ سجل المستخدم غير موجود");
+        }
 
         const now = new Date();
         const expectedNextDay = progress.streakDays + 1;
 
-        // حماية 1: التأكد من أن المستخدم يطلب اليوم الصحيح تتابعياً
+        // التحقق من اليوم الصحيح
         if (parseInt(dayNumber) !== expectedNextDay) {
-            return res.status(400).send("❌ طلب غير صالح، هذا اليوم ليس دورك حالياً");
+            return res.status(400).send("❌ هذا اليوم غير متاح حالياً");
         }
 
-        // حماية 2: التأكد من مرور 24 ساعة على آخر تحصيل
+        // التحقق من مرور 24 ساعة
         if (progress.lastCheckInTime) {
-            const nextAvailableTime = new Date(progress.lastCheckInTime).getTime() + (24 * 60 * 60 * 1000);
-            if (now.getTime() < nextAvailableTime) {
-                return res.status(400).send("⚠️ لم تمر 24 ساعة بعد!");
+            const nextAvailableTime =
+                new Date(progress.lastCheckInTime).getTime() +
+                (24 * 60 * 60 * 1000);
+
+            if (Date.now() < nextAvailableTime) {
+                return res.status(400).send("⚠️ لم تمر 24 ساعة بعد");
             }
         }
 
-        // جلب قيمة الجائزة المحددة لهذا اليوم
-        const rewardConfig = DAILY_REWARDS.find(r => r.dayNumber === expectedNextDay);
-        if (!rewardConfig) return res.status(400).send("❌ خطأ في إعدادات الأيام");
+        const rewardConfig = DAILY_REWARDS.find(
+            r => r.dayNumber === expectedNextDay
+        );
 
-        // 1. تحديث تقدم الدخول اليومي
-        progress.streakDays = expectedNextDay === 7 ? 0 : expectedNextDay; // إذا وصل لليوم 7، يصفر العداد للأسبوع القادم
-        progress.lastCheckInTime = now;
-        await progress.save();
-
-        // 2. إضافة النقاط مباشرة إلى حساب المستخدم في جدول WheelUser
-        const account = await WheelUser.findOne({ userId });
-        if (account) {
-            account.points += rewardConfig.points;
-            await account.save();
-            console.log(`🎰 Daily Reward Added: +${rewardConfig.points} points to user ${userId}`);
-            res.json({ success: true, newPoints: account.points });
-        } else {
-            res.status(404).send("❌ لم يتم العثور على جدول نقاط المستخدم الرئيسي");
+        if (!rewardConfig) {
+            return res.status(400).send("❌ إعداد الجائزة غير موجود");
         }
 
+        let rewardPoints = rewardConfig.points;
+
+        // مضاعفة المكافأة عند مشاهدة الإعلان
+        if (rewardType === "double") {
+            rewardPoints *= 2;
+        }
+
+        // تحديث التتابع
+        progress.streakDays =
+            expectedNextDay >= 7 ? 0 : expectedNextDay;
+
+        progress.lastCheckInTime = now;
+
+        await progress.save();
+
+        // تحديث النقاط
+        const account = await WheelUser.findOne({ userId });
+
+        if (!account) {
+            return res.status(404).send("❌ حساب النقاط غير موجود");
+        }
+
+        account.points += rewardPoints;
+
+        await account.save();
+
+        console.log(
+            `🎁 Daily reward: +${rewardPoints} points for ${userId}`
+        );
+
+        res.json({
+            success: true,
+            rewardType,
+            reward: rewardPoints,
+            newPoints: account.points
+        });
+
     } catch (err) {
-        console.error("❌ CLAIM DAILY ERROR:", err);
+        console.error("❌ DAILY CLAIM ERROR:", err);
         res.status(500).send("❌ خطأ داخلي في السيرفر");
     }
 });
-
-
-
-
-
 
 
 
