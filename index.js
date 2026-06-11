@@ -224,33 +224,55 @@ await PointsHistory.create({
 // ===================================
 // 📢 مسار تسجيل الإحالة الجديد (يتم استدعاؤه من التطبيق عند أول فتح)
 // ===================================
+// ===================================================================
+// 📢 مسار تسجيل الإحالة المطور (يتم استدعاؤه تلقائياً أو عند إعادة المحاولة)
+// ===================================================================
 app.post("/api/referral/register", async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
 
-    try {
-        const { userId, referrerCode } = req.body;
-        
-        if (!userId || !referrerCode) {
-            return res.status(400).send("❌ بيانات ناقصة");
-        }
+    try {
+        const { userId, referrerCode } = req.body;
+        
+        if (!userId || !referrerCode) {
+            return res.status(400).send("❌ بيانات ناقصة");
+        }
 
-        const user = await WheelUser.findOne({ userId });
-        
-        if (user && (!user.referredBy || user.referredBy === "")) {
-            user.referredBy = referrerCode;
-            user.referralStatus = "pending"; // 👈 تفعيل الحالة هنا لكي يظهر زر التحصيل بالأندرويد!
-            await user.save();
-            console.log(`🔗 Referral registered: ${userId} invited by ${referrerCode}`);
-            res.json({ success: true, message: "تم تسجيل الإحالة بنجاح" });
-        } else {
-            res.status(400).send("❌ الإحالة مسجلة مسبقاً أو المستخدم غير موجود");
-        }
-    } catch (err) {
-        console.error("❌ REGISTER REFERRAL ERROR:", err);
-        res.status(500).send("❌ خطأ في السيرفر");
-    }
+        // البحث عن المستخدم في MongoDB
+        let user = await WheelUser.findOne({ userId });
+        
+        // 🌟 الفكرة الجهنمية: إذا كان المستخدم جديداً ولم ينشأ حسابه في المونجو بعد، ننشئه له فوراً!
+        if (!user) {
+            console.log(`🆕 مستخدم جديد فتح التطبيق عبر إحالة، جاري إنشائه وتثبيتها: ${userId}`);
+            const finalCode = generateReferralCode(userId); // توليد كود إحالة خاص به للمستقبل
+            
+            user = await WheelUser.create({
+                userId: userId,
+                spinsLeft: 3,
+                referralCode: finalCode,
+                referredBy: referrerCode,
+                referralStatus: "pending" // نثبت الحالة معلقة لكي يتمكن من الضغط على "تحصيل"
+            });
+
+            return res.json({ success: true, message: "تم إنشاء الحساب وتسجيل الإحالة المعلقة بنجاح 🎉" });
+        }
+
+        // إذا كان الحساب موجوداً مسبقاً، نتحقق إن كان يملك داعي قديم أم لا
+        if (!user.referredBy || user.referredBy === "") {
+            user.referredBy = referrerCode;
+            user.referralStatus = "pending"; // تفعيل الحالة هنا لكي يظهر زر التحصيل بالأندرويد
+            await user.save();
+            
+            console.log(`🔗 Referral registered: ${userId} invited by ${referrerCode}`);
+            return res.json({ success: true, message: "تم تسجيل الإحالة بنجاح" });
+        } else {
+            return res.status(400).send("❌ الإحالة مسجلة مسبقاً لهذا الحساب");
+        }
+
+    } catch (err) {
+        console.error("❌ REGISTER REFERRAL ERROR:", err);
+        res.status(500).send("❌ خطأ في السيرفر");
+    }
 });
-
 
 
 
@@ -354,53 +376,44 @@ app.post("/saveAndStart", async (req, res) => {
 // 🎡 مسارات العجلة والنقاط (LUCKY WHEEL)
 // ===================================
 
+// ===================================================================
+// 🎡 مسار جلب حالة العجلة والنقاط المطور (مستقل كلياً عن الفايربيس)
+// ===================================================================
 app.get("/api/wheel/status", async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
-    
-    try {
-        const { userId } = req.query;
-        if (!userId) return res.status(400).send("❌ userId required");
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+    
+    try {
+        const { userId } = req.query;
+        if (!userId) return res.status(400).send("❌ userId required");
 
-        let account = await WheelUser.findOne({ userId });
+        let account = await WheelUser.findOne({ userId });
 
-      if (!account) {
-            // 1. نضع كوداً احتياطياً تحسباً لأي مشكلة في الاتصال بالفايربيس
-            let finalCode = generateReferralCode(userId); 
+        // إذا لم يجد الحساب (أي أن المستخدم فتح التطبيق بشكل طبيعي بدون رابط إحالة ولم يسجل من قبل)
+        if (!account) {
+            console.log(`🆕 جاري تهيئة حساب جديد بالكامل في MongoDB للمستخدم: ${userId}`);
+            const finalCode = generateReferralCode(userId); 
 
-            try {
-                // 2. السيرفر يتصل بالفايربيس ليقرأ الوثيقة التي أنشأها الأندرويد في LoginActivity
-                const userDoc = await firestore.collection("users").doc(userId).get();
-                
-                // 3. إذا وجدنا الحساب في الفايربيس، نأخذ الكود الأصلي (referralCode) الذي خلقه الأندرويد
-                if (userDoc.exists) {
-                    const userData = userDoc.data();
-                    if (userData.referralCode) {
-                        finalCode = userData.referralCode; // 👈 تم جلب الكود الصحيح والموحد!
-                    }
-                }
-            } catch (fbErr) {
-                console.log("⚠️ تعذر جلب الكود من الفايربيس، سيتم استخدام الكود الاحتياطي بالسيرفر");
-            }
+            account = await WheelUser.create({ 
+                userId, 
+                spinsLeft: 3,
+                referralCode: finalCode,
+                referredBy: "",
+                referralStatus: "none" // مستخدم عادي بدون أي إحالة معلقة
+            }); 
+        }
 
-            // 4. الآن ننشئ الحساب في المونجو دي بي بالكود الموحد والصحيح
-            account = await WheelUser.create({ 
-                userId, 
-                spinsLeft: 3,
-                referralCode: finalCode // هكذا أصبح الكود في المونجو مطابقاً تماماً لكود الفايربيس
-            }); 
-        }
-        // هذا الجزء للتأكد من إعادة ضبط الإعلانات كل يوم
-        if (new Date() >= account.resetTime) {
-            account.adsLeft = 5;
-            account.resetTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
-            await account.save();
-        }
+        // إعادة ضبط عدد الإعلانات المتاحة يومياً (الحفاظ على كودك الأصلي كما هو)
+        if (new Date() >= account.resetTime) {
+            account.adsLeft = 5;
+            account.resetTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
+            await account.save();
+        }
 
-        res.json(account);
-    } catch (err) {
-        console.log("❌ GET WHEEL ERROR:", err);
-        res.status(500).send("❌ خطأ");
-    }
+        res.json(account);
+    } catch (err) {
+        console.log("❌ GET WHEEL ERROR:", err);
+        res.status(500).send("❌ خطأ");
+    }
 });
 
 app.post("/api/wheel/spin", async (req, res) => {
@@ -658,6 +671,50 @@ app.get("/api/daily/status-vertical", async (req, res) => {
 
 // ===================================
 // ⚙️ 2. مسار تهيئة الحساب الثابت والمصلح (POST)
+
+
+
+// ===================================
+// ⚙️ 2. مسار تهيئة الحساب الثابت والمصلح (POST)
+// ===================================
+app.post("/api/user/init", async (req, res) => {
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+
+    try {
+        const { userId } = req.body;
+        if (!userId) return res.status(400).send("❌ userId required");
+
+        let account = await WheelUser.findOne({ userId });
+        if (!account) {
+            console.log(`🆕 تهيئة حساب نقاط جديد للمستخدم: ${userId}`);
+            const finalCode = generateReferralCode(userId);
+            account = await WheelUser.create({
+                userId,
+                spinsLeft: 3,
+                referralCode: finalCode,
+                referredBy: "",
+                referralStatus: "none"
+            });
+        }
+
+        let progress = await DailyCheckIn.findOne({ userId });
+        if (!progress) {
+            console.log(`🆕 تهيئة سجل دخول يومي جديد للمستخدم: ${userId}`);
+            await DailyCheckIn.create({
+                userId,
+                streakDays: 0,
+                lastCheckInTime: null
+            });
+        }
+
+        res.json({ success: true, message: "تمت تهيئة الحساب بنجاح وعمل المزامنة المونجو" });
+
+    } catch (err) {
+        console.error("❌ INIT USER ERROR:", err);
+        res.status(500).send("❌ خطأ داخلي في السيرفر");
+    }
+});
+
 
 
 // ===================================
