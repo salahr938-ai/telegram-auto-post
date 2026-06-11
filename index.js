@@ -84,6 +84,21 @@ const WheelUser = mongoose.model("WheelUser", wheelSchema);
 
 
 
+//تعريف الـ Schema الجديد في السيرفر
+
+const pointsHistorySchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  amount: { type: Number, required: true },
+  source: { type: String, required: true }, // 'wheel', 'referral', 'daily_normal', 'daily_double'
+  description: { type: String, required: true }, // نص يظهر للمستخدم مثل "مكافأة اليوم الأول مضاعفة"
+}, { timestamps: true });
+
+const PointsHistory = mongoose.model("PointsHistory", pointsHistorySchema);
+
+
+
+
+
 
 function generateReferralCode(userId) {
     return userId.substring(0, 6).toUpperCase() + Math.floor(1000 + Math.random() * 9000);
@@ -161,13 +176,36 @@ app.post("/api/referral/confirm", async (req, res) => {
     user.referralStatus = "confirmed";
     await user.save();
 
+
+ //كود ايستوري نقاط الاحالة 
+
+await PointsHistory.create({
+  userId: userId,
+  amount: 5000,
+  source: 'referral',
+  description: 'مكافأة تفعيل كود الإحالة 🎉'
+});
+
+
+
+
+
     // 5. منح مكافأة للشخص الذي قام بالدعوة
     const inviter = await WheelUser.findOne({ referralCode: user.referredBy });
     if (inviter) {
       inviter.points += 5000;
       await inviter.save();
       console.log(`🎁 Bonus awarded to inviter: ${inviter.userId}`);
-    }
+
+// 👇 هذا هو السطر الوحيد الذي تضعه هنا وتغلق القوس
+      await PointsHistory.create({
+        userId: inviter.userId, 
+        amount: 5000,
+        source: 'referral',
+        description: 'مكافأة دعوة صديق بنجاح 👥'
+      });
+    }
+
 
     // 6. تحديث الفايربيس (اختياري)
     try {
@@ -387,6 +425,21 @@ app.post("/api/wheel/spin", async (req, res) => {
     account.points += reward;
     account.lastPrize = `${reward} Points`;
     await account.save();
+
+
+//    ضع كود الـ if (reward > 0) { await PointsHistory.create... } الخاص بـ 'wheel' هنا
+
+
+if (reward > 0) {
+  await PointsHistory.create({
+    userId: userId,
+    amount: reward,
+    source: 'wheel',
+    description: `الفوز في عجلة الحظ 🎡`
+  });
+}
+
+
 
     res.json({
       index: randomIndex, 
@@ -667,6 +720,18 @@ app.post("/api/daily/claim-vertical", async (req, res) => {
         account.points += rewardPoints;
         await account.save();
 
+
+//هيستوري مسار 
+
+await PointsHistory.create({
+  userId: userId,
+  amount: rewardPoints,
+  source: rewardType === "double" ? "daily_double" : "daily_normal",
+  description: rewardType === "double" ? `مكافأة اليوم ${dayNumber} مضاعفة ✖️2️⃣` : `مكافأة الدخول اليومي لليوم ${dayNumber} 📅`
+});
+
+
+
         console.log(`🎁 Daily reward: +${rewardPoints} points for ${userId}`);
 
         res.json({
@@ -786,6 +851,34 @@ app.post("/deleteSingleOrder", async (req, res) => {
     res.status(500).send("❌ خطأ في السيرفر أثناء الحذف");
   }
 });
+
+
+
+
+//مسار جلب الهيستوري 
+
+
+app.get("/api/points/history", async (req, res) => {
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+    try {
+        const { userId } = req.query;
+        if (!userId) return res.status(400).send("❌ userId missing");
+
+        // جلب آخر 50 عملية مرتبة من الأحدث إلى الأقدم
+        const history = await PointsHistory.find({ userId }).sort({ createdAt: -1 }).limit(50);
+        res.json(history);
+    } catch (err) {
+        console.error("❌ GET HISTORY ERROR:", err);
+        res.status(500).send("❌ خطأ في السيرفر");
+    }
+});
+
+
+
+
+
+
+
 
 
 // ===================
