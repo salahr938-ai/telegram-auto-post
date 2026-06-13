@@ -97,6 +97,43 @@ const PointsHistory = mongoose.model("PointsHistory", pointsHistorySchema);
 
 
 
+// ===================================================================
+// 📅 كود نظام الأسئلة اليومية المجدولة والإعلانات (Quiz System)
+// ===================================================================
+
+const dailyQuizSchema = new mongoose.Schema({
+  targetDate: { type: String, required: true },       // التاريخ بصيغة YYYY-MM-DD
+  questionNumber: { type: Number, required: true },   // رقم السؤال من 1 إلى 5
+  question: { type: String, required: true },         // نص السؤال
+  options: { type: [String], required: true },        // الخيارات الأربعة
+  correctAnswer: { type: String, required: true },    // الإجابة الصحيحة
+  points: { type: Number, required: true }            // النقاط الممنوحة عند الحل الصحيح
+}, { timestamps: true });
+
+// ربط الموديل بالتجميعة في المونجو كومباس
+const DailyQuiz = mongoose.model("DailyQuiz", dailyQuizSchema, "daily_quizzes");
+
+// جدول لتسجيل حالة حل الأسئلة لكل مستخدم لمنع التكرار وحفظ مؤقت الـ 24 ساعة وحالة الإعلان
+const userQuizStatusSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  questionNumber: { type: Number, required: true },
+  isAnswered: { type: Boolean, default: false },
+  adWatched: { type: Boolean, default: false },       // 👈 هذا الحقل الجديد لكي يعرف السيرفر أن الإعلان تمت مشاهدته
+  availableAtTimestamp: { type: Number, default: 0 }  // وقت فتح السؤال القادم بعد 24 ساعة
+}, { timestamps: true });
+
+// إنشاء فهرس مركب لمنع التكرار وسرعة البحث
+userQuizStatusSchema.index({ userId: 1, questionNumber: 1 }, { unique: true });
+
+const UserQuizStatus = mongoose.model("UserQuizStatus", userQuizStatusSchema);
+
+
+
+
+
+
+
+
 
 
 
@@ -929,6 +966,175 @@ app.get("/api/points/history", async (req, res) => {
         res.status(500).send("❌ خطأ في السيرفر");
     }
 });
+
+
+// ===================================================================
+// 📝 1. مسار جلب سؤال اليوم بناءً على التاريخ والإعلانات (GET)
+// ===================================================================
+app.get("/api/quiz/get-question", async (req, res) => {
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+
+    try {
+        const { userId, questionNumber } = req.query;
+
+        if (!userId || !questionNumber) {
+            return res.status(400).send("❌ بيانات ناقصة (userId أو questionNumber مطلوب)");
+        }
+
+        const qNum = parseInt(questionNumber);
+        const now = Date.now();
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        // 1. جلب حالة السؤال الحالية للمستخدم من قاعدة البيانات
+        let status = await UserQuizStatus.findOne({ userId, questionNumber: qNum });
+
+        // 2. التحقق من قفل الـ 24 ساعة (إذا كان قد حل السؤال وأخذ نقاطه مسبقاً)
+        if (status && status.isAnswered && now < status.availableAtTimestamp) {
+            return res.status(403).json({ 
+                isLocked: true, 
+                requiresAd: false,
+                availableAtTimestamp: status.availableAtTimestamp,
+                message: "⏳ لقد حصلت على نقاط هذا السؤال سابقاً، انتظر انتهاء مؤقت الـ 24 ساعة!" 
+            });
+        }
+
+        // 3. 🛑 منطق الإعلانات الذكي:
+        // إذا كان السؤال رقم 2 أو 3 أو 4 أو 5، ولم يقم المستخدم بمشاهدة الإعلان له اليوم، نرسل للأندرويد أنه مقفل ويحتاج إعلان
+        if (qNum > 1) {
+            if (!status || !status.adWatched) {
+                return res.status(200).json({
+                    isLocked: true,
+                    requiresAd: true, // تخبر الأندرويد هنا أن يظهر رسالة "يجب مشاهدة إعلان"
+                    message: "🔒 هذا السؤال مقفل، يجب مشاهدة إعلان أولاً لفتحه!"
+                });
+            }
+        }
+
+        // 4. البحث عن السؤال المجدول في الـ MongoDB
+        const foundQ = await DailyQuiz.findOne({ targetDate: todayStr, questionNumber: qNum });
+
+        if (!foundQ) {
+            return res.status(404).send("❌ لم يتم جدولة أسئلة لهذا اليوم بعد أو السؤال غير موجود");
+        }
+
+        // 5. إرسال السؤال آمن وبدون الإجابة الصحيحة
+        const safeQuestion = {
+            id: foundQ._id,
+            questionNumber: foundQ.questionNumber,
+            question: foundQ.question,
+            options: foundQ.options,
+            points: foundQ.points,
+            isLocked: false,
+            requiresAd: false
+        };
+
+        res.json(safeQuestion);
+
+    } catch (err) {
+        console.error("❌ GET QUIZ QUESTION ERROR:", err);
+        res.status(500).send("❌ خطأ في السيرفر");
+    }
+});
+
+// ===================================================================
+// 🎬 مسار يفتحه الأندرويد بعد مشاهدة الإعلان بنجاح لفتح الأسئلة (2، 3، 4، 5)
+// ===================================================================
+app.post("/api/quiz/unlock-by-ad", async (req, res) => {
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+
+    try {
+        const { userId, questionNumber } = req.body;
+        const qNum = parseInt(questionNumber);
+
+        if (!userId || !qNum) {
+            return res.status(400).send("❌ بيانات ناقصة");
+        }
+
+        // تحديث أو إنشاء حالة السؤال لتصبح "تم مشاهدة الإعلان"
+        await UserQuizStatus.updateOne(
+            { userId, questionNumber: qNum },
+            { adWatched: true },
+            { upsert: true }
+        );
+
+        res.json({ success: true, message: `🔓 تم فتح السؤال رقم ${qNum} بنجاح، يمكنك حله الآن!` });
+
+    } catch (err) {
+        console.error("❌ UNLOCK QUIZ BY AD ERROR:", err);
+        res.status(500).send("❌ خطأ في السيرفر");
+    }
+});
+
+
+// ===================================================================
+// 💰 2. مسار التحقق من الإجابة، إضافة النقاط، وقفل الـ 24 ساعة (POST)
+// ===================================================================
+app.post("/api/quiz/verify-answer", async (req, res) => {
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+
+    try {
+        const { userId, questionId, selectedAnswer } = req.body;
+
+        if (!userId || !questionId || !selectedAnswer) {
+            return res.status(400).send("❌ بيانات الطلب ناقصة");
+        }
+
+        const question = await DailyQuiz.findById(questionId);
+        if (!question) {
+            return res.status(404).send("❌ السؤال غير موجود في السيرفر");
+        }
+
+        // التحقق من صحة الإجابة
+        const isCorrect = (question.correctAnswer.trim() === selectedAnswer.trim());
+
+        if (isCorrect) {
+            // أ) إضافة النقاط في حساب المستخدم الأساسي المعتمد عندك (WheelUser)
+            const account = await WheelUser.findOne({ userId });
+            if (!account) return res.status(404).send("❌ حساب النقاط غير موجود");
+
+            account.points += question.points;
+            await account.save();
+
+            // ب) تسجيل العملية في كشف الحساب (PointsHistory) لتظهر للمستخدم في السجل المونجو
+            await PointsHistory.create({
+                userId: userId,
+                amount: question.points,
+                source: 'daily_quiz',
+                description: `إجابة صحيحة عن سؤال اليوم رقم ${question.questionNumber} 🧠`
+            });
+
+            // ج) قفل السؤال وتفعيل مؤقت الـ 24 ساعة + إعادة ضبط حقل مشاهدة الإعلان ليقفل مجدداً غداً
+            const unlockTime = Date.now() + (24 * 60 * 60 * 1000);
+            
+            await UserQuizStatus.updateOne(
+                { userId, questionNumber: question.questionNumber },
+                { isAnswered: true, adWatched: false, availableAtTimestamp: unlockTime },
+                { upsert: true }
+            );
+
+            return res.json({ 
+                success: true, 
+                isCorrect: true, 
+                newPoints: account.points,
+                message: "🎉 إجابة صحيحة! تم قفل الزر بنجاح لمدة 24 ساعة وضبط الإعلانات للمرة القادمة" 
+            });
+        } else {
+            return res.json({ 
+                success: true, 
+                isCorrect: false, 
+                message: "❌ إجابة خاطئة، حاول مجدداً!" 
+            });
+        }
+
+    } catch (err) {
+        console.error("❌ VERIFY ANSWER ROUTE ERROR:", err);
+        res.status(500).send("❌ خطأ داخلي في السيرفر");
+    }
+});
+
+
+
+
 
 
 
