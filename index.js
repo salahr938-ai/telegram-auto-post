@@ -968,17 +968,21 @@ app.get("/api/points/history", async (req, res) => {
 });
 
 
+
+
+
+
 // ===================================================================
 // 📝 1. مسار جلب سؤال اليوم بناءً على التاريخ والإعلانات (GET)
 // ===================================================================
 app.get("/api/quiz/get-question", async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+    if (!isDbConnected) return res.status(503).json({ message: "⏳ DB not ready" });
 
     try {
         const { userId, questionNumber } = req.query;
 
         if (!userId || !questionNumber) {
-            return res.status(400).send("❌ بيانات ناقصة (userId أو questionNumber مطلوب)");
+            return res.status(400).json({ message: "❌ بيانات ناقصة (userId أو questionNumber مطلوب)" });
         }
 
         const qNum = parseInt(questionNumber);
@@ -988,24 +992,23 @@ app.get("/api/quiz/get-question", async (req, res) => {
         // 1. جلب حالة السؤال الحالية للمستخدم من قاعدة البيانات
         let status = await UserQuizStatus.findOne({ userId, questionNumber: qNum });
 
-        // 2. التحقق من قفل الـ 24 ساعة (إذا كان قد حل السؤال وأخذ نقاطه مسبقاً)
+        // 2. التحقق من قفل الـ 24 ساعة (إذا كان قد حل السؤال وأخذ نقاطه مسبقاً) - تم تحويل الرد إلى JSON
         if (status && status.isAnswered && now < status.availableAtTimestamp) {
-            return res.status(403).json({ 
+            return res.status(200).json({ 
                 isLocked: true, 
                 requiresAd: false,
                 availableAtTimestamp: status.availableAtTimestamp,
-                message: "⏳ لقد حصلت على نقاط هذا السؤال سابقاً، انتظر انتهاء مؤقت الـ 24 ساعة!" 
+                message: "❌ لقد حصلت على نقاط هذا السؤال سابقاً، انتظر انتهاء مؤقت الـ 24 ساعة!" 
             });
         }
 
-        // 3. 🛑 منطق الإعلانات الذكي:
-        // إذا كان السؤال رقم 2 أو 3 أو 4 أو 5، ولم يقم المستخدم بمشاهدة الإعلان له اليوم، نرسل للأندرويد أنه مقفل ويحتاج إعلان
+        // 3. 🛑 منطق الإعلانات الذكي: تم تحويل الرد إلى JSON نظيف للأندرويد
         if (qNum > 1) {
             if (!status || !status.adWatched) {
                 return res.status(200).json({
                     isLocked: true,
-                    requiresAd: true, // تخبر الأندرويد هنا أن يظهر رسالة "يجب مشاهدة إعلان"
-                    message: "🔒 هذا السؤال مقفل، يجب مشاهدة إعلان أولاً لفتحه!"
+                    requiresAd: true, 
+                    message: "❌ هذا السؤال مقفل، يجب مشاهدة إعلان أولاً لفتحه!"
                 });
             }
         }
@@ -1014,11 +1017,11 @@ app.get("/api/quiz/get-question", async (req, res) => {
         const foundQ = await DailyQuiz.findOne({ targetDate: todayStr, questionNumber: qNum });
 
         if (!foundQ) {
-            return res.status(404).send("❌ لم يتم جدولة أسئلة لهذا اليوم بعد أو السؤال غير موجود");
+            return res.status(404).json({ message: "❌ لم يتم جدولة أسئلة لهذا اليوم بعد أو السؤال غير موجود" });
         }
 
-        // 5. إرسال السؤال آمن وبدون الإجابة الصحيحة
-        const safeQuestion = {
+        // 5. إرسال السؤال آمن وبدون الإجابة الصحيحة بصيغة JSON
+        res.json({
             id: foundQ._id,
             questionNumber: foundQ.questionNumber,
             question: foundQ.question,
@@ -1026,112 +1029,109 @@ app.get("/api/quiz/get-question", async (req, res) => {
             points: foundQ.points,
             isLocked: false,
             requiresAd: false
-        };
-
-        res.json(safeQuestion);
+        });
 
     } catch (err) {
         console.error("❌ GET QUIZ QUESTION ERROR:", err);
-        res.status(500).send("❌ خطأ في السيرفر");
+        res.status(500).json({ message: "❌ خطأ داخلي في السيرفر" });
     }
 });
 
 // ===================================================================
-// 🎬 مسار يفتحه الأندرويد بعد مشاهدة الإعلان بنجاح لفتح الأسئلة (2، 3، 4، 5)
+// 🎬 2. مسار يفتحه الأندرويد بعد مشاهدة الإعلان بنجاح لفتح الأسئلة (POST)
 // ===================================================================
 app.post("/api/quiz/unlock-by-ad", async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+    if (!isDbConnected) return res.status(503).json({ message: "⏳ DB not ready" });
 
     try {
         const { userId, questionNumber } = req.body;
-        const qNum = parseInt(questionNumber);
-
-        if (!userId || !qNum) {
-            return res.status(400).send("❌ بيانات ناقصة");
+        if (!userId || !questionNumber) {
+            return res.status(400).json({ message: "❌ بيانات غير مكتملة" });
         }
 
-        // تحديث أو إنشاء حالة السؤال لتصبح "تم مشاهدة الإعلان"
-        await UserQuizStatus.updateOne(
+        const qNum = parseInt(questionNumber);
+
+        // تسجيل أن المستخدم شاهد الإعلان الخاص بهذا السؤال بنجاح
+        await UserQuizStatus.findOneAndUpdate(
             { userId, questionNumber: qNum },
-            { adWatched: true },
-            { upsert: true }
+            { $set: { adWatched: true } },
+            { upsert: true, new: true }
         );
 
-        res.json({ success: true, message: `🔓 تم فتح السؤال رقم ${qNum} بنجاح، يمكنك حله الآن!` });
+        res.json({ success: true, message: "تم فتح السؤال بنجاح، يمكنك الانتقال للتحدي الآن! 🎉" });
 
     } catch (err) {
-        console.error("❌ UNLOCK QUIZ BY AD ERROR:", err);
-        res.status(500).send("❌ خطأ في السيرفر");
+        console.error("❌ UNLOCK BY AD ERROR:", err);
+        res.status(500).json({ message: "❌ خطأ في السيرفر أثناء فتح السؤال" });
     }
 });
 
-
 // ===================================================================
-// 💰 2. مسار التحقق من الإجابة، إضافة النقاط، وقفل الـ 24 ساعة (POST)
+// 🔐 3. مسار التحقق من صحة الإجابة وتوزيع النقاط وحفظ الهيستوري (POST)
 // ===================================================================
 app.post("/api/quiz/verify-answer", async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+    if (!isDbConnected) return res.status(503).json({ message: "⏳ DB not ready" });
 
     try {
-        const { userId, questionId, selectedAnswer } = req.body;
+        const { userId, questionId, questionNumber, selectedAnswer } = req.body;
 
-        if (!userId || !questionId || !selectedAnswer) {
-            return res.status(400).send("❌ بيانات الطلب ناقصة");
+        if (!userId || !questionId || !questionNumber || !selectedAnswer) {
+            return res.status(400).json({ message: "❌ بيانات التحقق من الإجابة ناقصة" });
         }
 
-        const question = await DailyQuiz.findById(questionId);
-        if (!question) {
-            return res.status(404).send("❌ السؤال غير موجود في السيرفر");
+        const qNum = parseInt(questionNumber);
+
+        // جلب السؤال من قاعدة البيانات للتأكد من الإجابة الصحيحة
+        const originalQuiz = await DailyQuiz.findById(questionId);
+        if (!originalQuiz) {
+            return res.status(404).json({ message: "❌ لم يتم العثور على السؤال في السيرفر" });
         }
 
-        // التحقق من صحة الإجابة
-        const isCorrect = (question.correctAnswer.trim() === selectedAnswer.trim());
+        const isCorrect = originalQuiz.correctAnswer.trim() === selectedAnswer.trim();
 
         if (isCorrect) {
-            // أ) إضافة النقاط في حساب المستخدم الأساسي المعتمد عندك (WheelUser)
-            const account = await WheelUser.findOne({ userId });
-            if (!account) return res.status(404).send("❌ حساب النقاط غير موجود");
-
-            account.points += question.points;
-            await account.save();
-
-            // ب) تسجيل العملية في كشف الحساب (PointsHistory) لتظهر للمستخدم في السجل المونجو
-            await PointsHistory.create({
-                userId: userId,
-                amount: question.points,
-                source: 'daily_quiz',
-                description: `إجابة صحيحة عن سؤال اليوم رقم ${question.questionNumber} 🧠`
-            });
-
-            // ج) قفل السؤال وتفعيل مؤقت الـ 24 ساعة + إعادة ضبط حقل مشاهدة الإعلان ليقفل مجدداً غداً
+            // حساب مؤقت الـ 24 ساعة لسحب السؤال اليومي
             const unlockTime = Date.now() + (24 * 60 * 60 * 1000);
-            
-            await UserQuizStatus.updateOne(
-                { userId, questionNumber: question.questionNumber },
-                { isAnswered: true, adWatched: false, availableAtTimestamp: unlockTime },
+
+            // تحديث حالة حل السؤال وإعادة قفل حقل الإعلان لليوم القادم لضمان الحماية
+            await UserQuizStatus.findOneAndUpdate(
+                { userId, questionNumber: qNum },
+                { 
+                    $set: { 
+                        isAnswered: true, 
+                        adWatched: false, 
+                        availableAtTimestamp: unlockTime 
+                    } 
+                },
                 { upsert: true }
             );
 
-            return res.json({ 
-                success: true, 
-                isCorrect: true, 
-                newPoints: account.points,
-                message: "🎉 إجابة صحيحة! تم قفل الزر بنجاح لمدة 24 ساعة وضبط الإعلانات للمرة القادمة" 
+            // شحن النقاط للمستخدم في رصيده الأساسي (WheelUser)
+            const account = await WheelUser.findOne({ userId });
+            if (account) {
+                account.points += originalQuiz.points;
+                await account.save();
+            }
+
+            // تسجيل العملية في جدول الهيستوري (PointsHistory) لكي تظهر في حساب المستخدم
+            await PointsHistory.create({
+                userId: userId,
+                amount: originalQuiz.points,
+                source: "quiz",
+                description: `حل تحدي السؤال اليومي رقم ${qNum} بنجاح 🧩`
             });
+
+            return res.json({ isCorrect: true, message: "🎉 إجابة صحيحة مئة بالمئة! تم شحن نقاطك بنجاح." });
         } else {
-            return res.json({ 
-                success: true, 
-                isCorrect: false, 
-                message: "❌ إجابة خاطئة، حاول مجدداً!" 
-            });
+            // إذا كانت الإجابة خاطئة نرجع النتيجة بدون قفل وبدون نقاط لكي يعيد المحاولة
+            return res.json({ isCorrect: false, message: "❌ إجابة خاطئة! ركز جيداً وحاول مجدداً." });
         }
 
     } catch (err) {
         console.error("❌ VERIFY ANSWER ROUTE ERROR:", err);
-        res.status(500).send("❌ خطأ داخلي في السيرفر");
+        res.status(500).json({ message: "❌ خطأ داخلي في السيرفر أثناء مطابقة الإجابة" });
     }
 });
-
 
 
 
