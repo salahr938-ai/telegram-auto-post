@@ -987,7 +987,9 @@ app.get("/api/quiz/get-question", async (req, res) => {
 
         const qNum = parseInt(questionNumber);
         const now = Date.now();
-        const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = new Date().toLocaleDateString('en-CA', {
+    timeZone: 'Asia/Kuwait'
+});
 
         // 1. جلب حالة السؤال الحالية للمستخدم من قاعدة البيانات
         let status = await UserQuizStatus.findOne({ userId, questionNumber: qNum });
@@ -1013,6 +1015,8 @@ app.get("/api/quiz/get-question", async (req, res) => {
             }
         }
 
+console.log("todayStr =", todayStr);
+console.log("qNum =", qNum);
         // 4. البحث عن السؤال المجدول في الـ MongoDB
         const foundQ = await DailyQuiz.findOne({ targetDate: todayStr, questionNumber: qNum });
 
