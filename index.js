@@ -917,6 +917,47 @@ app.post("/deleteTokenOnly", async (req, res) => {
   }
 });
 
+
+
+
+// مسار الاحالة للشخص الداعي 
+
+app.get("/api/referral/my-invites", async (req, res) => {
+    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+    try {
+        const { userId } = req.query;
+        if (!userId) return res.status(400).send("❌ userId required");
+
+        const user = await WheelUser.findOne({ userId });
+        if (!user) return res.status(404).send("❌ غير موجود");
+
+        // عدد الأشخاص الذين دعاهم وهم في حالة pending
+        const pendingCount = await WheelUser.countDocuments({ 
+            referredBy: user.referralCode, 
+            referralStatus: "pending" 
+        });
+
+        // عدد الأشخاص الذين دعاهم وتم تأكيدهم
+        const confirmedCount = await WheelUser.countDocuments({ 
+            referredBy: user.referralCode, 
+            referralStatus: "confirmed" 
+        });
+
+        res.json({ pendingCount, confirmedCount });
+    } catch (err) {
+        res.status(500).send("❌ خطأ في السيرفر");
+    }
+});
+
+
+
+
+
+
+
+
+
+
 // ===================
 // 🔹 DELETE SINGLE ORDER
 // ===================
