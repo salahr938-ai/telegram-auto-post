@@ -14,6 +14,7 @@ const systemRoutes = require("./routes/systemRoutes");
 const userRoutes = require("./routes/userRoutes");
 const quizRoutes = require("./routes/quizRoutes");
 const dailyRoutes = require("./routes/dailyRoutes");
+const { setDbStatus, getDbStatus } = require("./config/dbStatus");
 // ==========================================
 // 2. إعدادات التطبيق (App Setup)
 // ==========================================
@@ -23,11 +24,10 @@ mongoose.set('autoIndex', false); // إيقاف auto index
 app.use(cors());
 app.use(express.json());
 
-let isDbConnected = false;
 
 // Middleware للتحقق من اتصال قاعدة البيانات
 app.use((req, res, next) => {
-    if (!isDbConnected) {
+    if (!getDbStatus()) {
         return res.status(503).json({ error: "⏳ DB not ready" });
     }
     next();
@@ -52,7 +52,7 @@ app.use("/api/daily", dailyRoutes);
 mongoose.connect(process.env.MONGO_URI)
     .then(async () => {
         console.log("✅ Connected to MongoDB");
-        isDbConnected = true;
+       setDbStatus(true);
 
         // تنظيف الـ Index
         try {
