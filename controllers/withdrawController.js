@@ -1,10 +1,10 @@
 const WheelUser = require("../models/WheelUser");
 const PointsHistory = require("../models/PointsHistory");
-const { firestore } = require("../firebase");
-const { isDbConnected } = require("../index"); // تأكد من استيراد حالة الاتصال
+const firestore = require("../firebase");
+const { getDbStatus } = require("../config/dbStatus");
 
 exports.withdraw = async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ قاعدة البيانات غير جاهزة");
+   if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
 
     try {
         const { userId, points, wallet } = req.body;
@@ -44,7 +44,7 @@ exports.withdraw = async (req, res) => {
 };
 
 exports.reject = async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ قاعدة البيانات غير جاهزة");
+    if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
 
     try {
         const { requestId, userId, points } = req.body;

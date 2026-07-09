@@ -1,18 +1,20 @@
 // ===================
-// 🔥 FIREBASE ADMIN CONFIG (ملف مستقل)
+// 🔥 FIREBASE ADMIN CONFIG
 // ===================
+
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 
-// استدعاء ملف المفتاح (بما أنه في نفس المجلد، نكتب ./ مجدداً)
+// تحميل مفتاح Firebase Admin
 const serviceAccount = require("./serviceAccountKey.json");
 
-// تشغيل الاتصال بـ Firebase
+// تشغيل Firebase Admin
 initializeApp({
-  credential: cert(serviceAccount)
+    credential: cert(serviceAccount)
 });
 
+// إنشاء اتصال Firestore
 const firestore = getFirestore();
 
-// 📤 السطر السحري الناقص: تصدير المتغير لكي نقدر نخدمو بيه في ملفات أخرى
+// تصدير Firestore لاستخدامه في Controllers
 module.exports = firestore;

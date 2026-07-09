@@ -1,13 +1,12 @@
 const WheelUser = require("../models/WheelUser");
 const PointsHistory = require("../models/PointsHistory");
 // استيراد المتغيرات الأساسية (تأكد من تعديل المسارات إذا لزم الأمر)
-const { firestore } = require("../firebase"); 
+const firestore = require("../firebase");
 const { generateReferralCode } = require("../utils/crypto"); 
 // افترضنا أن isDbConnected معرفة في مكان مركزي أو يتم تمريرها
-const { isDbConnected } = require("../index"); 
-
+const { getDbStatus } = require("../config/dbStatus");
 exports.confirmReferral = async (req, res) => {
-  if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+ if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
   try {
     const { userId } = req.body;
     if (!userId) return res.status(400).send("❌ userId required");
@@ -54,7 +53,7 @@ exports.confirmReferral = async (req, res) => {
 };
 
 exports.registerReferral = async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+    if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
         const { userId, referrerCode } = req.body;
         if (!userId || !referrerCode) return res.status(400).send("❌ بيانات ناقصة");
@@ -88,7 +87,7 @@ exports.registerReferral = async (req, res) => {
 };
 
 exports.getMyInvites = async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
         const { userId } = req.query;
         if (!userId) return res.status(400).send("❌ userId required");

@@ -1,10 +1,10 @@
 const WheelUser = require("../models/WheelUser");
 const PointsHistory = require("../models/PointsHistory");
 const { generateReferralCode } = require("../utils/crypto");
-const { isDbConnected } = require("../index"); // أو مسار DB
+const { getDbStatus } = require("../config/dbStatus");
 
 exports.getWheelStatus = async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+  if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
         const { userId } = req.query;
         if (!userId) return res.status(400).send("❌ userId required");
@@ -28,7 +28,7 @@ exports.getWheelStatus = async (req, res) => {
 };
 
 exports.spinWheel = async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
         const { userId } = req.body;
         if (!userId) return res.status(400).send("❌ userId required");
@@ -57,7 +57,7 @@ exports.spinWheel = async (req, res) => {
 };
 
 exports.watchAd = async (req, res) => {
-    if (!isDbConnected) return res.status(503).send("⏳ DB not ready");
+    if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
         const { userId } = req.body;
         const account = await WheelUser.findOne({ userId });

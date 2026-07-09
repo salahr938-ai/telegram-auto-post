@@ -2,12 +2,12 @@ const WheelUser = require("../models/WheelUser");
 const DailyCheckIn = require("../models/DailyCheckIn");
 // تأكد من استيراد دالة التوليد من المكان الذي توجد فيه (مثلاً ملف utils)
 const { generateReferralCode } = require("../utils/generator"); 
-
+const { getDbStatus } = require("../config/dbStatus");
 exports.initUser = async (req, res) => {
     // نستخدم المتغير العام isDbConnected من الـ index
-    if (typeof isDbConnected === 'undefined' || !isDbConnected) {
-        return res.status(503).send("⏳ DB not ready");
-    }
+ if (!getDbStatus()) {
+    return res.status(503).send("⏳ DB not ready");
+}
 
     try {
         const { userId } = req.body;
