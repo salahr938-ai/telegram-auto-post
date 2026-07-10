@@ -15,7 +15,7 @@ exports.claimScratch = async (req, res) => {
         if (!user) return res.status(404).json({ message: "مستخدم غير موجود" });
 
         // 2. تسجيل العملية في سجل التاريخ (ليظهر في التطبيق)
-        await History.create({
+        await PointsHistory.create({
             userId: userId,
             amount: amount,
             source: 'scratch',
