@@ -1,5 +1,5 @@
 const WheelUser = require('../models/wheelUser'); // تأكد من اسم الملف
-const History = require('../models/history'); // الموديل الذي أنشأناه سابقاً
+const History = require('../models/pointsHistory'); // الموديل الذي أنشأناه سابقاً
 
 exports.claimScratch = async (req, res) => {
     try {
