@@ -16,6 +16,7 @@ const quizRoutes = require("./routes/quizRoutes");
 const dailyRoutes = require("./routes/dailyRoutes");
 const { setDbStatus, getDbStatus } = require("./config/dbStatus");
 const pointsRoutes = require("./routes/pointsRoutes");
+const scratchRoutes = require('./routes/scratchRoutes');
 // ==========================================
 // 2. إعدادات التطبيق (App Setup)
 // ==========================================
@@ -47,6 +48,7 @@ app.use("/api/user", userRoutes);
 app.use("/api/quiz", quizRoutes);
 app.use("/api/daily", dailyRoutes);
 app.use("/api/points", pointsRoutes);
+app.use('/api/scratch', scratchRoutes);
 // ==========================================
 // 4. الاتصال بقاعدة البيانات والتشغيل
 // ==========================================
