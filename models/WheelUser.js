@@ -9,7 +9,8 @@ const wheelSchema = new mongoose.Schema({
   spinsLeft: { type: Number, default: 0 },
   adsLeft: { type: Number, default: 5 },
   lastPrize: { type: String, default: "0" },
-  resetTime: { type: Date, default: () => new Date(Date.now() + 24 * 60 * 60 * 1000) }
+  resetTime: { type: Date, default: () => new Date(Date.now() + 24 * 60 * 60 * 1000) },
+lastScratchAt: { type: Date, default: new Date(0) }
 }, { timestamps: true });
 
 // تصدير الموديل لكي نستخدمه في المسارات (Routes)
