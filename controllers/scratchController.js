@@ -43,3 +43,23 @@ exports.claimScratch = async (req, res) => {
         res.status(500).json({ message: "خطأ في السيرفر", error: error.message });
     }
 };
+// 2. دالة جلب الحالة (تُستخدم لإظهار العداد التنازلي في التطبيق)
+exports.getScratchStatus = async (req, res) => {
+    try {
+        const user = await WheelUser.findOne({ userId: req.params.userId });
+        if (!user) return res.status(404).json({ message: "مستخدم غير موجود" });
+
+        const now = new Date();
+        const lastScratch = user.lastScratchAt || new Date(0);
+        const diff = now.getTime() - lastScratch.getTime();
+        const twentyFourHours = 24 * 60 * 60 * 1000;
+
+        if (diff >= twentyFourHours) {
+            res.json({ canScratch: true, remainingTimeMs: 0 });
+        } else {
+            res.json({ canScratch: false, remainingTimeMs: twentyFourHours - diff });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
