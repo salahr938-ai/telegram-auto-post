@@ -1,5 +1,8 @@
-const WheelUser = require('../models/wheelUser'); // تأكد من اسم الملف
-const PointsHistory = require('../models/pointsHistory'); // استوردنا الاسم الصحيح
+// غيّر السطر الأول ليكون:
+const WheelUser = require('../models/WheelUser'); 
+
+// غيّر السطر الثاني ليكون:
+const PointsHistory = require('../models/PointsHistory');
 
 exports.claimScratch = async (req, res) => {
     try {
