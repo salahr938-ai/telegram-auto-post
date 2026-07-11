@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 // تأكد من مسار الكنترولر الخاص بك
 const scratchController = require('../controllers/scratchController'); 
+router.post('/reset-scratch', scratchController.resetScratchTime);
 // الرابط الجديد لجلب حالة الكشط (مسموح أم لا + الوقت المتبقي)
 router.get('/status/:userId', scratchController.getScratchStatus);
 // هذا هو الرابط الذي سيتصل به تطبيق الأندرويد: /api/points/add-scratch

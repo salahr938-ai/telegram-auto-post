@@ -63,3 +63,16 @@ exports.getScratchStatus = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+exports.resetScratchTime = async (req, res) => {
+    try {
+        const { userId } = req.body;
+        // نضبط وقت الكشط ليكون قديم جداً (مما يسمح بالكشط فوراً)
+        await WheelUser.findOneAndUpdate(
+            { userId: userId },
+            { lastScratchAt: new Date(0) }
+        );
+        res.json({ success: true, message: "تم تصفير الوقت، يمكنك الكشط الآن!" });
+    } catch (error) {
+        res.status(500).json({ message: "خطأ في السيرفر" });
+    }
+};
