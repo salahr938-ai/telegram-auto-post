@@ -55,9 +55,13 @@ exports.getScratchStatus = async (req, res) => {
         const twentyFourHours = 24 * 60 * 60 * 1000;
 
         if (diff >= twentyFourHours) {
-            res.json({ canScratch: true, remainingTimeMs: 0 });
+            res.json({ canScratch: true, 
+                remainingTimeMs: 0, 
+                points: user.points });
         } else {
-            res.json({ canScratch: false, remainingTimeMs: twentyFourHours - diff });
+            res.json({ canScratch: false, 
+                remainingTimeMs: twentyFourHours - diff, 
+                points: user.points });
         }
     } catch (error) {
         res.status(500).json({ error: error.message });
