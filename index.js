@@ -4,6 +4,8 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const firestore = require("./firebase");
+const cron = require('node-cron');
+const WheelUser = require('./models/WheelUser');
 
 // استيراد الـ Routes
 const referralRoutes = require("./routes/referralRoutes");
@@ -56,6 +58,16 @@ mongoose.connect(process.env.MONGO_URI)
     .then(async () => {
         console.log("✅ Connected to MongoDB");
        setDbStatus(true);
+
+       // --- كود التصفير اليومي (Cron Job) ---
+        cron.schedule('0 0 * * *', async () => {
+            try {
+                await WheelUser.updateMany({}, { adsLeft: 5 });
+                console.log("🔄 Reset all adsLeft to 5 for all users");
+            } catch (error) {
+                console.error("❌ Cron Job Error:", error);
+            }
+        });
 
         // تنظيف الـ Index
         try {
