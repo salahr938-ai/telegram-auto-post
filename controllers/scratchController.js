@@ -91,17 +91,20 @@ exports.watchAd = async (req, res) => {
         
         if (!user) return res.status(404).json({ message: "مستخدم غير موجود" });
         
-        // التحقق من أن المستخدم لديه فرص
+        // 1. التحقق من وجود فرص
         if (user.adsLeft <= 0) {
             return res.status(403).json({ message: "لقد وصلت للحد الأقصى للإعلانات اليوم!" });
         }
 
-        // خصم فرصة واحدة
+        // 2. خصم فرصة إعلان
         user.adsLeft -= 1;
-        // زيادة فرص التدوير أو الكشط (مثلاً إضافة 1)
-        // إذا كان هذا للإعلانات الخاصة بالكشط، تأكد من منطقك
+        
+        // 3. التعديل الأهم: تفعيل الكشط فوراً بجعل الوقت قديماً
+        user.lastScratchAt = new Date(0); 
+        
         await user.save();
 
+        // 4. إرسال رد النجاح مع القيمة الجديدة للفرص
         res.json({ success: true, adsLeft: user.adsLeft });
     } catch (error) {
         res.status(500).json({ message: "خطأ في السيرفر" });
