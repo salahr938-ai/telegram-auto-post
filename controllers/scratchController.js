@@ -60,8 +60,8 @@ exports.getScratchStatus = async (req, res) => {
         const canScratch = diff >= twentyFourHours;
 
         res.json({ 
-            canScratch: canScratch, 
-            remainingTimeMs: canScratch ? 0 : twentyFourHours - diff, 
+            allowed: canScratch, 
+        remainingTime: canScratch ? 0 : twentyFourHours - diff, 
             points: user.points,
             adsLeft: adsLeft 
         });
