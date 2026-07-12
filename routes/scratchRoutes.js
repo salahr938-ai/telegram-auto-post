@@ -7,5 +7,5 @@ router.post('/reset-scratch', scratchController.resetScratchTime);
 router.get('/status/:userId', scratchController.getScratchStatus);
 // هذا هو الرابط الذي سيتصل به تطبيق الأندرويد: /api/points/add-scratch
 router.post('/add-scratch', scratchController.claimScratch);
-
+router.post('/watch-ad', scratchController.watchAd);
 module.exports = router;
