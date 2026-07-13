@@ -1,5 +1,5 @@
 const WheelUser = require("../models/WheelUser");
-
+const PointsHistory = require("../models/PointsHistory"); // تأكد من اسم ملف الموديل عندك
 // توزيع الجوائز
 const prizes = [
     { chance: 35, points: 20 },
@@ -106,6 +106,13 @@ exports.openBox = async (req, res) => {
 
         // بعد الفتح مباشرة، يصبح غير متاح حتى يشاهد الإعلان بالكامل لتفعيل العداد
         user.boxAvailable = false;
+        // === إضافة العملية إلى سجل النقاط (History) ===
+        await PointsHistory.create({
+            userId: userId,
+            amount: prize,
+            source: "surprise_box",
+            description: `ربحت ${prize} نقطة من فتح صندوق المفاجآت!`
+        });
 
         await user.save();
 
