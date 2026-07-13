@@ -10,7 +10,11 @@ const wheelSchema = new mongoose.Schema({
   adsLeft: { type: Number, default: 5 },
   lastPrize: { type: String, default: "0" },
   resetTime: { type: Date, default: () => new Date(Date.now() + 24 * 60 * 60 * 1000) },
-lastScratchAt: { type: Date, default: new Date(0) }
+lastScratchAt: { type: Date, default: new Date(0) },
+// 📦 صندوق المفاجآت
+boxAvailable: { type: Boolean, default: true }, // أول مرة متاح مجانا
+boxNextOpen: { type: Date, default: new Date(0) }, // موعد الفتح القادم
+boxOpenedCount: { type: Number, default: 0 } // عدد مرات الفتح
 }, { timestamps: true });
 
 // تصدير الموديل لكي نستخدمه في المسارات (Routes)

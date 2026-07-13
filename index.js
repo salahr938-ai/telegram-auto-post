@@ -19,6 +19,7 @@ const dailyRoutes = require("./routes/dailyRoutes");
 const { setDbStatus, getDbStatus } = require("./config/dbStatus");
 const pointsRoutes = require("./routes/pointsRoutes");
 const scratchRoutes = require('./routes/scratchRoutes');
+const surpriseBoxRoutes = require("./routes/surpriseBoxRoutes");
 // ==========================================
 // 2. إعدادات التطبيق (App Setup)
 // ==========================================
@@ -51,6 +52,7 @@ app.use("/api/quiz", quizRoutes);
 app.use("/api/daily", dailyRoutes);
 app.use("/api/points", pointsRoutes);
 app.use('/api/scratch', scratchRoutes);
+app.use("/api/surprise-box", surpriseBoxRoutes);
 // ==========================================
 // 4. الاتصال بقاعدة البيانات والتشغيل
 // ==========================================
