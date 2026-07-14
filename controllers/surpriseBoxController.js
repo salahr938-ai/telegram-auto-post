@@ -1,6 +1,7 @@
 const WheelUser = require("../models/WheelUser");
-const PointsHistory = require("../models/PointsHistory"); // تأكد من اسم ملف الموديل عندك
-// توزيع الجوائز
+const PointsHistory = require("../models/PointsHistory");
+
+// توزيع الجوائز ونسب الحظ
 const prizes = [
     { chance: 35, points: 20 },
     { chance: 25, points: 30 },
@@ -23,15 +24,13 @@ function getRandomPrize() {
             return prize.points;
         }
     }
-
     return 20;
 }
 
-// معرفة حالة الصندوق
+// 1. معرفة حالة الصندوق
 exports.getStatus = async (req, res) => {
     try {
         const { userId } = req.body;
-
         const user = await WheelUser.findOne({ userId });
 
         if (!user) {
@@ -43,7 +42,7 @@ exports.getStatus = async (req, res) => {
 
         const now = new Date();
 
-        // إذا انتهى العداد يصبح الصندوق متاحاً تلقائياً
+        // إذا انتهى العداد (3 ساعات) يصبح الصندوق متاحاً تلقائياً للفتح مجدداً
         if (!user.boxAvailable && user.boxNextOpen && now >= user.boxNextOpen) {
             user.boxAvailable = true;
             await user.save();
@@ -53,17 +52,17 @@ exports.getStatus = async (req, res) => {
             return res.json({
                 success: true,
                 canOpen: true,
-                remainingTime: 0 // الصندوق جاهز، لا يوجد وقت متبقي
+                remainingTime: 0
             });
         }
 
-        // حساب الوقت المتبقي وتحويله من (ملي ثانية) إلى (ثواني) ليتوافق مع الأندرويد
+        // حساب الوقت المتبقي بالثواني ليتوافق مع الأندرويد
         const remainingMillis = user.boxNextOpen ? (user.boxNextOpen.getTime() - now.getTime()) : 0;
         const remainingSeconds = Math.max(0, Math.floor(remainingMillis / 1000));
 
         res.json({
             success: true,
-            canOpen: remainingSeconds <= 0,
+            canOpen: false,
             remainingTime: remainingSeconds
         });
 
@@ -75,11 +74,10 @@ exports.getStatus = async (req, res) => {
     }
 };
 
-// فتح الصندوق
+// 2. فتح الصندوق الفعلي وتوزيع الجوائز
 exports.openBox = async (req, res) => {
     try {
         const { userId } = req.body;
-
         const user = await WheelUser.findOne({ userId });
 
         if (!user) {
@@ -89,13 +87,12 @@ exports.openBox = async (req, res) => {
             });
         }
 
-        const now = new Date();
-
-        // التحقق من إتاحة الصندوق
-        if (!user.boxAvailable && user.boxNextOpen && now < user.boxNextOpen) {
+        // 🛡️ منع الفتح المتكرر: إذا كان الصندوق مغلقاً بالفعل، ارفض العملية واطلب مشاهدة الإعلان
+        if (!user.boxAvailable) {
             return res.json({
                 success: false,
-                message: "الصندوق غير متاح حاليا"
+                needAd: true,
+                message: "يجب مشاهدة الإعلان أولاً لتفعيل الصندوق"
             });
         }
 
@@ -104,9 +101,11 @@ exports.openBox = async (req, res) => {
         user.points += prize;
         user.boxOpenedCount = (user.boxOpenedCount || 0) + 1;
 
-        // بعد الفتح مباشرة، يصبح غير متاح حتى يشاهد الإعلان بالكامل لتفعيل العداد
+        // 🔒 أغلق الصندوق واجعل الوقت صفر حتى لا يبدأ العداد بالعد قبل مشاهدة الإعلان
         user.boxAvailable = false;
-        // === إضافة العملية إلى سجل النقاط (History) ===
+        user.boxNextOpen = new Date(0); 
+
+        // تسجيل العملية في الـ History مع اللون النيلي المخصص له في الأندرويد
         await PointsHistory.create({
             userId: userId,
             amount: prize,
@@ -130,11 +129,10 @@ exports.openBox = async (req, res) => {
     }
 };
 
-// بعد مشاهدة الإعلان
+// 3. مشاهدة الإعلان وتفعيل عداد الـ 3 ساعات
 exports.watchAd = async (req, res) => {
     try {
         const { userId } = req.body;
-
         const user = await WheelUser.findOne({ userId });
 
         if (!user) {
@@ -144,7 +142,7 @@ exports.watchAd = async (req, res) => {
             });
         }
 
-        // تأكيد إغلاق الصندوق وبدء العداد التنازلي لـ 3 ساعات
+        // تأكيد إغلاق الصندوق وبدء العداد التنازلي لـ 3 ساعات كاملة
         user.boxAvailable = false;
         user.boxNextOpen = new Date(Date.now() + 3 * 60 * 60 * 1000);
 
