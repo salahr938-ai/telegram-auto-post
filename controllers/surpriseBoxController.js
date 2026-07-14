@@ -27,7 +27,7 @@ function getRandomPrize() {
     return 20;
 }
 
-// 1. معرفة حالة الصندوق
+// 1. معرفة حالة الصندوق (تم التعديل لإرسال النقاط الكلية)
 exports.getStatus = async (req, res) => {
     try {
         const { userId } = req.body;
@@ -42,6 +42,7 @@ exports.getStatus = async (req, res) => {
         }
 
         const now = new Date();
+        const totalPoints = user.points || 0; // 🌟 جلب النقاط الكلية للمستخدم
 
         // إذا لم يبدأ العداد بعد (ينتظر مشاهدة الإعلان)
         if (
@@ -52,7 +53,8 @@ exports.getStatus = async (req, res) => {
             return res.json({
                 success: true,
                 canOpen: false,
-                remainingTime: 0
+                remainingTime: 0,
+                points: totalPoints // 🌟 أضفنا النقاط هنا
             });
         }
 
@@ -69,7 +71,8 @@ exports.getStatus = async (req, res) => {
             return res.json({
                 success: true,
                 canOpen: true,
-                remainingTime: 0
+                remainingTime: 0,
+                points: totalPoints // 🌟 أضفنا النقاط هنا
             });
         }
 
@@ -77,13 +80,14 @@ exports.getStatus = async (req, res) => {
             return res.json({
                 success: true,
                 canOpen: true,
-                remainingTime: 0
+                remainingTime: 0,
+                points: totalPoints // 🌟 أضفنا النقاط هنا
             });
         }
 
-      const remainingMillis = user.boxNextOpen
-    ? user.boxNextOpen.getTime() - now.getTime()
-    : 0;
+        const remainingMillis = user.boxNextOpen
+            ? user.boxNextOpen.getTime() - now.getTime()
+            : 0;
 
         res.json({
             success: true,
@@ -91,7 +95,8 @@ exports.getStatus = async (req, res) => {
             remainingTime: Math.max(
                 0,
                 Math.floor(remainingMillis / 1000)
-            )
+            ),
+            points: totalPoints // 🌟 أضفنا النقاط هنا أيضاً
         });
 
     } catch (e) {
@@ -115,7 +120,7 @@ exports.openBox = async (req, res) => {
             });
         }
 
-        // 🛡️ منع الفتح المتكرر: إذا كان الصندوق مغلقاً بالفعل، ارفض العملية واطلب مشاهدة الإعلان
+        // 🛡️ منع الفتح المتكرر
         if (!user.boxAvailable) {
             return res.json({
                 success: false,
@@ -129,11 +134,11 @@ exports.openBox = async (req, res) => {
         user.points += prize;
         user.boxOpenedCount = (user.boxOpenedCount || 0) + 1;
 
-        // 🔒 أغلق الصندوق واجعل الوقت صفر حتى لا يبدأ العداد بالعد قبل مشاهدة الإعلان
+        // 🔒 أغلق الصندوق واجعل الوقت صفر
         user.boxAvailable = false;
         user.boxNextOpen = new Date(0); 
 
-        // تسجيل العملية في الـ History مع اللون النيلي المخصص له في الأندرويد
+        // تسجيل العملية في الـ History
         await PointsHistory.create({
             userId: userId,
             amount: prize,
@@ -157,7 +162,6 @@ exports.openBox = async (req, res) => {
     }
 };
 
-
 // 3. مشاهدة الإعلان وتفعيل عداد الـ 3 ساعات
 exports.watchAd = async (req, res) => {
     try {
@@ -173,7 +177,7 @@ exports.watchAd = async (req, res) => {
 
         const now = Date.now();
 
-        // 🛡️ حماية: إذا كان العداد يعمل بالفعل ولم ينتهِ بعد، ارفض إعادة التعيين
+        // 🛡️ حماية: إذا كان العداد يعمل بالفعل
         if (
             user.boxNextOpen &&
             user.boxNextOpen.getTime() > now
@@ -186,7 +190,6 @@ exports.watchAd = async (req, res) => {
             });
         }
 
-        // تأكيد إغلاق الصندوق وبدء العداد التنازلي لـ 3 ساعات كاملة لأول مرة
         user.boxAvailable = false;
         user.boxNextOpen = new Date(now + 3 * 60 * 60 * 1000);
 
