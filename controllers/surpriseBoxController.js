@@ -31,6 +31,7 @@ function getRandomPrize() {
 exports.getStatus = async (req, res) => {
     try {
         const { userId } = req.body;
+
         const user = await WheelUser.findOne({ userId });
 
         if (!user) {
@@ -42,10 +43,34 @@ exports.getStatus = async (req, res) => {
 
         const now = new Date();
 
-        // إذا انتهى العداد (3 ساعات) يصبح الصندوق متاحاً تلقائياً للفتح مجدداً
-        if (!user.boxAvailable && user.boxNextOpen && now >= user.boxNextOpen) {
+        // إذا لم يبدأ العداد بعد (ينتظر مشاهدة الإعلان)
+        if (
+            !user.boxAvailable &&
+            user.boxNextOpen &&
+            user.boxNextOpen.getTime() === 0
+        ) {
+            return res.json({
+                success: true,
+                canOpen: false,
+                remainingTime: 0
+            });
+        }
+
+        // إذا انتهت مدة الثلاث ساعات
+        if (
+            !user.boxAvailable &&
+            user.boxNextOpen &&
+            user.boxNextOpen.getTime() > 0 &&
+            now >= user.boxNextOpen
+        ) {
             user.boxAvailable = true;
             await user.save();
+
+            return res.json({
+                success: true,
+                canOpen: true,
+                remainingTime: 0
+            });
         }
 
         if (user.boxAvailable) {
@@ -56,14 +81,17 @@ exports.getStatus = async (req, res) => {
             });
         }
 
-        // حساب الوقت المتبقي بالثواني ليتوافق مع الأندرويد
-        const remainingMillis = user.boxNextOpen ? (user.boxNextOpen.getTime() - now.getTime()) : 0;
-        const remainingSeconds = Math.max(0, Math.floor(remainingMillis / 1000));
+      const remainingMillis = user.boxNextOpen
+    ? user.boxNextOpen.getTime() - now.getTime()
+    : 0;
 
         res.json({
             success: true,
             canOpen: false,
-            remainingTime: remainingSeconds
+            remainingTime: Math.max(
+                0,
+                Math.floor(remainingMillis / 1000)
+            )
         });
 
     } catch (e) {
@@ -129,6 +157,7 @@ exports.openBox = async (req, res) => {
     }
 };
 
+
 // 3. مشاهدة الإعلان وتفعيل عداد الـ 3 ساعات
 exports.watchAd = async (req, res) => {
     try {
@@ -142,9 +171,24 @@ exports.watchAd = async (req, res) => {
             });
         }
 
-        // تأكيد إغلاق الصندوق وبدء العداد التنازلي لـ 3 ساعات كاملة
+        const now = Date.now();
+
+        // 🛡️ حماية: إذا كان العداد يعمل بالفعل ولم ينتهِ بعد، ارفض إعادة التعيين
+        if (
+            user.boxNextOpen &&
+            user.boxNextOpen.getTime() > now
+        ) {
+            return res.json({
+                success: false,
+                alreadyRunning: true,
+                message: "العداد يعمل بالفعل، لا يمكن إعادة تعيينه!",
+                nextOpen: user.boxNextOpen
+            });
+        }
+
+        // تأكيد إغلاق الصندوق وبدء العداد التنازلي لـ 3 ساعات كاملة لأول مرة
         user.boxAvailable = false;
-        user.boxNextOpen = new Date(Date.now() + 3 * 60 * 60 * 1000);
+        user.boxNextOpen = new Date(now + 3 * 60 * 60 * 1000);
 
         await user.save();
 
