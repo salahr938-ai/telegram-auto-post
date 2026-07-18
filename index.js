@@ -6,7 +6,7 @@ const mongoose = require("mongoose");
 const firestore = require("./firebase");
 const cron = require('node-cron');
 const WheelUser = require('./models/WheelUser');
-
+const path = require('path');
 // استيراد الـ Routes
 const referralRoutes = require("./routes/referralRoutes");
 const wheelRoutes = require("./routes/wheelRoutes");
@@ -24,19 +24,19 @@ const surpriseBoxRoutes = require("./routes/surpriseBoxRoutes");
 // 2. إعدادات التطبيق (App Setup)
 // ==========================================
 const app = express();
-mongoose.set('autoIndex', false); // إيقاف auto index
-
-app.use(cors());
-app.use(express.json());
-
-
-// Middleware للتحقق من اتصال قاعدة البيانات
+app.use(express.static(path.join(__dirname, 'public')));
 app.use((req, res, next) => {
-    if (!getDbStatus()) {
+    // إذا لم تكن القاعدة جاهزة، اسمح فقط بفتح الموقع، أما طلبات الـ API فامنحها خطأ 503
+    if (!getDbStatus() && req.path !== '/' && req.path !== '/index.html' && req.path !== '/privacy.html') {
         return res.status(503).json({ error: "⏳ DB not ready" });
     }
     next();
 });
+
+mongoose.set('autoIndex', false); // إيقاف auto index
+
+app.use(cors());
+app.use(express.json());
 
 
 // 3. تعريف المسارات (Routes)

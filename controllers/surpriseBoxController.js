@@ -1,6 +1,6 @@
 const WheelUser = require("../models/WheelUser");
 const PointsHistory = require("../models/PointsHistory");
-
+const mongoose = require("mongoose");
 // توزيع الجوائز ونسب الحظ
 const prizes = [
     { chance: 35, points: 20 },
@@ -108,45 +108,61 @@ exports.getStatus = async (req, res) => {
 };
 
 // 2. فتح الصندوق الفعلي وتوزيع الجوائز
+
 exports.openBox = async (req, res) => {
+    const session = await mongoose.startSession();
+
     try {
+        session.startTransaction();
+
         const { userId } = req.body;
-        const user = await WheelUser.findOne({ userId });
+
+        // قفل الصندوق بشكل Atomic لمنع الفتح مرتين
+        const user = await WheelUser.findOneAndUpdate(
+            {
+                userId,
+                boxAvailable: true
+            },
+            {
+                $set: {
+                    boxAvailable: false,
+                    boxNextOpen: new Date(0)
+                }
+            },
+            {
+                new: true,
+                session
+            }
+        );
 
         if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: "المستخدم غير موجود"
-            });
+            throw new Error("الصندوق غير متاح أو يجب مشاهدة الإعلان أولاً.");
         }
 
-        // 🛡️ منع الفتح المتكرر
-        if (!user.boxAvailable) {
-            return res.json({
-                success: false,
-                needAd: true,
-                message: "يجب مشاهدة الإعلان أولاً لتفعيل الصندوق"
-            });
-        }
-
+        // اختيار الجائزة
         const prize = getRandomPrize();
 
-        user.points += prize;
+        // إضافة النقاط بأمان
+        user.points = (user.points || 0) + prize;
         user.boxOpenedCount = (user.boxOpenedCount || 0) + 1;
 
-        // 🔒 أغلق الصندوق واجعل الوقت صفر
-        user.boxAvailable = false;
-        user.boxNextOpen = new Date(0); 
+        await user.save({ session });
 
-        // تسجيل العملية في الـ History
-        await PointsHistory.create({
-            userId: userId,
-            amount: prize,
-            source: "surprise_box",
-            description: `ربحت ${prize} نقطة من فتح صندوق المفاجآت!`
-        });
+        // تسجيل العملية
+        await PointsHistory.create(
+            [
+                {
+                    userId,
+                    amount: prize,
+                    source: "surprise_box",
+                    description: `ربحت ${prize} نقطة من فتح صندوق المفاجآت!`
+                }
+            ],
+            { session }
+        );
 
-        await user.save();
+        // حفظ جميع العمليات
+        await session.commitTransaction();
 
         res.json({
             success: true,
@@ -155,10 +171,15 @@ exports.openBox = async (req, res) => {
         });
 
     } catch (e) {
-        res.status(500).json({
+        await session.abortTransaction();
+
+        res.status(400).json({
             success: false,
             message: e.message
         });
+
+    } finally {
+        session.endSession();
     }
 };
 
