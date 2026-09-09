@@ -2,16 +2,24 @@
 // 🔥 FIREBASE ADMIN CONFIG
 // ===================
 
-const { initializeApp, cert } = require("firebase-admin/app");
+const { initializeApp, cert, getApps } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 
-// تحميل مفتاح Firebase Admin
-const serviceAccount = require("./serviceAccountKey.json");
+// التحقق مما إذا كان التطبيق مفعل مسبقاً لمنع التكرار
+if (!getApps().length) {
+    let serviceAccount;
 
-// تشغيل Firebase Admin
-initializeApp({
-    credential: cert(serviceAccount)
-});
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+        // قراءة المفتاح من المتغير البيئي الآمن (على Render أو .env محلياً)
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    } else {
+        throw new Error("FIREBASE_SERVICE_ACCOUNT environment variable is missing!");
+    }
+
+    initializeApp({
+        credential: cert(serviceAccount)
+    });
+}
 
 // إنشاء اتصال Firestore
 const firestore = getFirestore();
