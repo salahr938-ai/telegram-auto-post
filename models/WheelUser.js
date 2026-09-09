@@ -14,7 +14,10 @@ lastScratchAt: { type: Date, default: new Date(0) },
 // 📦 صندوق المفاجآت
 boxAvailable: { type: Boolean, default: true }, // أول مرة متاح مجانا
 boxNextOpen: { type: Date, default: new Date(0) }, // موعد الفتح القادم
-boxOpenedCount: { type: Number, default: 0 } // عدد مرات الفتح
+boxOpenedCount: { type: Number, default: 0 },// عدد مرات الفتح
+// 🧩 خريطة مستويات لعبة المطابقة (Match-3)
+  unlockedLevel: { type: Number, default: 1 }, // أعلى مستوى متاح للمستخدم
+  levelCooldowns: { type: Map, of: Date, default: {} }
 }, { timestamps: true });
 
 // تصدير الموديل لكي نستخدمه في المسارات (Routes)

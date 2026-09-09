@@ -2,7 +2,7 @@ const WheelUser = require("../models/WheelUser");
 const PointsHistory = require("../models/PointsHistory");
 const mongoose = require("mongoose");
 
-// تحديث نقاط ومستوى لعبة المطابقة عند الفوز مع حماية 24 ساعة ضد الغش
+// تحديث نقاط ومستوى لعبة Water Sort عند الفوز مع حماية 24 ساعة ضد الغش
 exports.updateScore = async (req, res) => {
     const session = await mongoose.startSession();
     try {
@@ -16,7 +16,6 @@ exports.updateScore = async (req, res) => {
             });
         }
 
-        // البحث عن المستخدم باستخدام الموديل الموحد WheelUser
         const user = await WheelUser.findOne({ userId }).session(session);
         if (!user) {
             return res.status(404).json({ 
@@ -25,13 +24,12 @@ exports.updateScore = async (req, res) => {
             });
         }
 
-        // تهيئة حقل الـ Map الخاص بالتبريد إذا لم يكن موجوداً
-        if (!user.levelCooldowns) {
-            user.levelCooldowns = new Map();
+        // استخدام حقل خاص بـ Water Sort لتفادي التداخل مع الألعاب الأخرى
+        if (!user.waterSortCooldowns) {
+            user.waterSortCooldowns = new Map();
         }
 
-        // التحقق من مرور 24 ساعة لمنع الغش وإعادة لعب نفس المستوى فوراً
-        const lastWinTime = user.levelCooldowns.get(levelCompleted.toString());
+        const lastWinTime = user.waterSortCooldowns.get(levelCompleted.toString());
         const now = new Date();
         const twentyFourHours = 24 * 60 * 60 * 1000;
 
@@ -43,25 +41,20 @@ exports.updateScore = async (req, res) => {
             });
         }
 
-        // تسجيل وقت الفوز الحالي لهذا المستوى
-        user.levelCooldowns.set(levelCompleted.toString(), now);
-
-        // إضافة النقاط الجديدة إلى الرصيد الكلي
+        user.waterSortCooldowns.set(levelCompleted.toString(), now);
         user.points = (user.points || 0) + Number(pointsEarned);
 
-        // تحديث مستوى تقدم اللعبة إذا كان المستوى المكتمل أكبر أو يساوي المخزن حالياً
-        if (levelCompleted >= (user.unlockedLevel || 1)) {
-            user.unlockedLevel = levelCompleted + 1; // فتح المستوى التالي
+        if (levelCompleted >= (user.waterSortUnlockedLevel || 1)) {
+            user.waterSortUnlockedLevel = levelCompleted + 1; // فتح المستوى التالي
         }
 
         await user.save({ session });
 
-        // تسجيل العملية في السجل
         await PointsHistory.create([{
             userId,
             amount: pointsEarned,
-            source: "match3_game",
-            description: `ربحت ${pointsEarned} نقطة من إتمام المستوى ${levelCompleted}!`
+            source: "watersort_game",
+            description: `ربحت ${pointsEarned} نقطة من إتمام مستوى الأنابيب ${levelCompleted}!`
         }], { session });
 
         await session.commitTransaction();
@@ -69,7 +62,7 @@ exports.updateScore = async (req, res) => {
         res.json({
             success: true,
             totalPoints: user.points,
-            unlockedLevel: user.unlockedLevel || 1,
+            unlockedLevel: user.waterSortUnlockedLevel || 1,
             message: "تم حفظ النقاط والمستوى بنجاح"
         });
 
@@ -97,12 +90,11 @@ exports.checkLevelStatus = async (req, res) => {
             return res.status(404).json({ allowed: false, message: "المستخدم غير موجود" });
         }
 
-        // إذا لم يكن قد لعب هذا المستوى من قبل، فهو مسموح له
-        if (!user.levelCooldowns || !user.levelCooldowns.get(level.toString())) {
+        if (!user.waterSortCooldowns || !user.waterSortCooldowns.get(level.toString())) {
             return res.json({ allowed: true, message: "مسموح باللعب" });
         }
 
-        const lastWinTime = new Date(user.levelCooldowns.get(level.toString()));
+        const lastWinTime = new Date(user.waterSortCooldowns.get(level.toString()));
         const now = new Date();
         const twentyFourHours = 24 * 60 * 60 * 1000;
         const timeDiff = now - lastWinTime;

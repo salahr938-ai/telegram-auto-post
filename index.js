@@ -21,6 +21,7 @@ const pointsRoutes = require("./routes/pointsRoutes");
 const scratchRoutes = require('./routes/scratchRoutes');
 const surpriseBoxRoutes = require("./routes/surpriseBoxRoutes");
 const match3Routes = require("./routes/match3Routes");
+const waterSortRoutes = require("./routes/waterSortRoutes");
 // ==========================================
 // 2. إعدادات التطبيق (App Setup)
 // ==========================================
@@ -44,6 +45,7 @@ app.use(express.json());
 
 // المسارات المنظمة عبر الـ Router
 app.use("/api/referral", referralRoutes);
+app.use("/api/watersort", waterSortRoutes);
 app.use("/api/wheel", wheelRoutes);
 app.use("/api/bot", botRoutes);
 app.use("/api/withdraw", withdrawRoutes);
