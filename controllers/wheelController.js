@@ -29,7 +29,7 @@ exports.getWheelStatus = async (req, res) => {
             const finalCode = generateReferralCode(userId);
             account = await WheelUser.create({ 
                 userId, 
-                spinsLeft: 3, 
+                spinsLeft: 1, 
                 referralCode: finalCode, 
                 referredBy: "", 
                 referralStatus: "none",
@@ -39,8 +39,8 @@ exports.getWheelStatus = async (req, res) => {
 
         // التحقق من وقت إعادة التعيين اليومي
         if (new Date() >= account.resetTime) {
-            account.adsLeft = 5;
-            account.spinsLeft = 3; // إعادة تعيين المحاولات اليومية أيضاً
+            account.adsLeft = 1;
+            account.spinsLeft = 1; // إعادة تعيين المحاولات اليومية أيضاً
             account.resetTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
             await account.save();
         }
