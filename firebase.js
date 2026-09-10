@@ -4,13 +4,13 @@
 
 const { initializeApp, cert, getApps } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
+const { getAuth } = require("firebase-admin/auth"); // أضف هذا السطر لاستيراد الـ Auth
 
 // التحقق مما إذا كان التطبيق مفعل مسبقاً لمنع التكرار
 if (!getApps().length) {
     let serviceAccount;
 
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-        // قراءة المفتاح من المتغير البيئي الآمن (على Render أو .env محلياً)
         serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
     } else {
         throw new Error("FIREBASE_SERVICE_ACCOUNT environment variable is missing!");
@@ -21,8 +21,12 @@ if (!getApps().length) {
     });
 }
 
-// إنشاء اتصال Firestore
+// إنشاء اتصال Firestore و Auth
 const firestore = getFirestore();
+const auth = getAuth(); // تهيئة الـ Auth
 
-// تصدير Firestore لاستخدامه في Controllers
-module.exports = firestore;
+// تصديرهما معا لاستخدامهما في باقي الملفات
+module.exports = {
+    firestore,
+    auth
+};

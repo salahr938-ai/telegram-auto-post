@@ -20,8 +20,9 @@ function getRandomIndexByWeight() {
 exports.getWheelStatus = async (req, res) => {
     if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
-        const { userId } = req.query;
-        if (!userId) return res.status(400).send("❌ userId required");
+        // 🛡️ التعديل هنا: جلب الـ userId مباشرة من التوكن الموثوق
+        const userId = req.user && req.user.uid;
+        if (!userId) return res.status(400).send("❌ unauthorized userId");
 
         let account = await WheelUser.findOne({ userId });
         if (!account) {
@@ -53,8 +54,9 @@ exports.getWheelStatus = async (req, res) => {
 exports.spinWheel = async (req, res) => {
     if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
-        const { userId } = req.body;
-        if (!userId) return res.status(400).send("❌ userId required");
+        // 🛡️ التعديل هنا: جلب الـ userId مباشرة من التوكن الموثوق
+        const userId = req.user && req.user.uid;
+        if (!userId) return res.status(400).send("❌ unauthorized userId");
 
         const account = await WheelUser.findOne({ userId });
         if (!account) return res.status(404).send("❌ غير موجود");
@@ -89,8 +91,9 @@ exports.spinWheel = async (req, res) => {
 exports.watchAd = async (req, res) => {
     if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
-        const { userId } = req.body;
-        if (!userId) return res.status(400).send("❌ userId required");
+        // 🛡️ التعديل هنا: جلب الـ userId مباشرة من التوكن الموثوق
+        const userId = req.user && req.user.uid;
+        if (!userId) return res.status(400).send("❌ unauthorized userId");
 
         const account = await WheelUser.findOne({ userId });
         if (!account) return res.status(404).send("❌ غير موجود");

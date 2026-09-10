@@ -1,4 +1,5 @@
-const admin = require("firebase-admin");
+// استيراد الـ auth مباشرة من ملف الإعدادات الخاص بك (تأكد من صحة مسار الملف)
+const { auth } = require("../config/firebaseConfig"); 
 
 const verifyFirebaseToken = async (req, res, next) => {
     try {
@@ -12,10 +13,10 @@ const verifyFirebaseToken = async (req, res, next) => {
         // استخراج التوكن من الـ Header
         const token = authHeader.split("Bearer ")[1];
 
-        // التحقق من صلاحية التوكن عبر Firebase Admin SDK
-        const decodedToken = await admin.auth().verifyIdToken(token);
+        // التحقق من صلاحية التوكن مباشرة باستخدام الـ auth المستورد
+        const decodedToken = await auth.verifyIdToken(token);
 
-        // تخزين معلومات المستخدم (مثل الـ uid) للرغبة في استخدامها لاحقاً
+        // تخزين معلومات المستخدم (مثل الـ uid) لاستخدامها لاحقاً
         req.user = decodedToken;
 
         next(); // المرور بنجاح إلى الـ Controller التنفيذي
