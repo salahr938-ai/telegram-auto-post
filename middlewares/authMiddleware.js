@@ -1,5 +1,5 @@
 // استيراد الـ auth مباشرة من ملف الإعدادات الخاص بك (تأكد من صحة مسار الملف)
-const { auth } = require("../config/firebaseConfig"); 
+const { auth } = require("../firebase");
 
 const verifyFirebaseToken = async (req, res, next) => {
     try {
