@@ -110,12 +110,55 @@ exports.spinWheel = async (req, res) => {
         account.points += reward;
         account.lastPrize = `${reward}`;
 
-        // التحقق من وصول المستخدم إلى 500 نقطة لتسجيله في المسابقة
+  // التحقق من وصول المستخدم إلى 500 نقطة لتسجيله في المسابقة
         if (account.points >= 500 && !account.isRegistered) {
             account.isRegistered = true;
-            account.participantsCount = (account.participantsCount || 0) + 1;
-            // ملاحظة: تم إزالة المنح التلقائي هنا، وسيتم اعتماد مكافأة الـ 0.20 يدوياً 
-            // عبر دالة confirmReferral عندما يفوز الصديق ضمن الـ 3 فائزين.
+            
+            // جلب الدورة النشطة وتحديث عدد المشتركين
+            let activeContest = await Contest.findOne({ status: 'active' });
+            if (!activeContest) {
+                activeContest = await Contest.create({ 
+                    contestNumber: 1, 
+                    participantsCount: 0, 
+                    maxParticipants: 500,
+                    status: 'active' 
+                });
+            }
+
+            activeContest.participantsCount += 1;
+
+            // إذا اكتمل العدد 500 مشترك، نختار 3 فائزين عشوائياً ونغلق الدورة ونبدأ دورة جديدة!
+            if (activeContest.participantsCount >= activeContest.maxParticipants) {
+                // جلب جميع المستخدمين المسجلين في هذه الدورة
+                const registeredUsers = await WheelUser.find({ isRegistered: true });
+                
+                // خلط عشوائي لاختيار 3 فائزين
+                const shuffled = registeredUsers.sort(() => 0.5 - Math.random());
+                const selectedWinners = shuffled.slice(0, 3);
+
+                activeContest.winners = selectedWinners.map(w => ({
+                    userId: w.userId,
+                    maskedName: `User_${w.userId.substring(0, 4)}***`,
+                    prize: "3$"
+                }));
+                activeContest.status = 'completed';
+                await activeContest.save();
+
+                // إبطال تسجيل المستخدمين الحاليين وإعادة تعيين نقاطهم للبدء من جديد للدورة القادمة
+                await WheelUser.updateMany({ isRegistered: true }, { isRegistered: false, points: 0 });
+
+                // فتح دورة جديدة برقم جديد
+                await Contest.create({
+                    contestNumber: activeContest.contestNumber + 1,
+                    participantsCount: 0,
+                    maxParticipants: 500,
+                    status: 'active'
+                });
+            } else {
+                await activeContest.save();
+            }
+
+            account.participantsCount = activeContest.participantsCount;
         }
 
         await account.save();
@@ -135,6 +178,40 @@ exports.spinWheel = async (req, res) => {
             nextSpinTime: account.nextSpinTime,
             isRegistered: account.isRegistered,
             participantsCount: account.participantsCount
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("❌ خطأ في السيرفر");
+    }
+};
+const Contest = require("../models/Contest");
+
+exports.getContestInfo = async (req, res) => {
+    if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
+    try {
+        // البحث عن الدورة النشطة حالياً، أو إنشاء الأولى إن لمג تكن موجودة
+        let activeContest = await Contest.findOne({ status: 'active' });
+        if (!activeContest) {
+            activeContest = await Contest.create({
+                contestNumber: 1,
+                participantsCount: 0,
+                maxParticipants: 500,
+                status: 'active',
+                winners: []
+            });
+        }
+
+        // جلب آخر الدورات المنتهية لعرضها في سجل الفائزين
+        const pastContests = await Contest.find({ status: 'completed' })
+            .sort({ contestNumber: -1 })
+            .limit(10);
+
+        res.json({
+            currentContestNumber: activeContest.contestNumber,
+            participantsCount: activeContest.participantsCount,
+            maxParticipants: activeContest.maxParticipants,
+            winners: activeContest.winners || [],
+            pastContests: pastContests
         });
     } catch (err) {
         console.error(err);
