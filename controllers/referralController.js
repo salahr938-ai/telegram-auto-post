@@ -1,15 +1,32 @@
 const WheelUser = require("../models/WheelUser");
 const PointsHistory = require("../models/PointsHistory");
-const firestore = require("../firebase");
+const firestore = require("../firebase"); // أو admin حسب ما تستخدمه في مشروعك
 const { generateReferralCode } = require("../utils/crypto"); 
 const { getDbStatus } = require("../config/dbStatus");
 
+// ================= 🛡️ دالة وسيطة للتحقق من التوكن الحقيقي =================
+const verifyToken = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).send("❌ غير مصرح: لا يوجد توكن أمان");
+    }
+    const token = authHeader.split("Bearer ")[1];
+    try {
+        const decodedToken = await firestore.auth().verifyIdToken(token);
+        req.user = decodedToken; // استخراج الـ uid الحقيقي للمستخدم بأمان
+        next();
+    } catch (err) {
+        console.error("❌ TOKEN VERIFICATION ERROR:", err);
+        return res.status(401).send("❌ غير مصرح: توكن غير صالح أو منتهي الصلاحية");
+    }
+};
+
 // ================= 1. تأكيد الإحالة ومنح 0.20 للداعي عند الفوز =================
-exports.confirmReferral = async (req, res) => {
+const confirmReferral = async (req, res) => {
     if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
-        const { userId } = req.body; // معرف الصديق المدعو
-        if (!userId) return res.status(400).send("❌ userId required");
+        // 🛡️ استخراج الـ userId حصرياً من التوكن الآمن
+        const userId = req.user.uid;
 
         const user = await WheelUser.findOne({ userId });
         if (!user) return res.status(404).send("❌ المستخدم غير موجود");
@@ -30,7 +47,6 @@ exports.confirmReferral = async (req, res) => {
         // 💰 إضافة 0.20 إلى "رصيد الأصدقاء" (friendPoints) الخاص بالداعي (Inviter)
         const inviter = await WheelUser.findOne({ referralCode: user.referredBy });
         if (inviter) {
-            // زيادة الرصيد بصيغة عشرية صحيحة (تجنب مشاكل الأرقام العشرية في جافاسكريبت)
             inviter.friendPoints = Number(((inviter.friendPoints || 0) + 0.20).toFixed(2));
             await inviter.save();
 
@@ -56,11 +72,14 @@ exports.confirmReferral = async (req, res) => {
 };
 
 // ================= 2. تسجيل الإحالة عند استخدام الكود لأول مرة =================
-exports.registerReferral = async (req, res) => {
+const registerReferral = async (req, res) => {
     if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
-        const { userId, referrerCode } = req.body;
-        if (!userId || !referrerCode) return res.status(400).send("❌ بيانات ناقصة");
+        // 🛡️ استخراج الـ userId من التوكن، و referrerCode من الـ body
+        const userId = req.user.uid;
+        const { referrerCode } = req.body;
+        
+        if (!referrerCode) return res.status(400).send("❌ كود الإحالة مطلوب");
 
         // حماية: منع المستخدم من استخدام كود الإحالة الخاص به لنفسه
         const selfCheck = await WheelUser.findOne({ userId });
@@ -78,7 +97,7 @@ exports.registerReferral = async (req, res) => {
                 referralCode: finalCode,
                 referredBy: referrerCode,
                 referralStatus: "pending",
-                friendPoints: 0.0 // تهيئة رصيد الأصدقاء
+                friendPoints: 0.0 
             });
             return res.json({ success: true, message: "تم إنشاء الحساب وتسجيل الإحالة المعلقة بنجاح 🎉" });
         }
@@ -98,11 +117,11 @@ exports.registerReferral = async (req, res) => {
 };
 
 // ================= 3. جلب عدد الإحالات (معلقة ومؤكدة) =================
-exports.getMyInvites = async (req, res) => {
+const getMyInvites = async (req, res) => {
     if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
-        const { userId } = req.query;
-        if (!userId) return res.status(400).send("❌ userId required");
+        // 🛡️ استخراج الـ userId من التوكن الآمن بدل الـ query parameters
+        const userId = req.user.uid;
 
         const user = await WheelUser.findOne({ userId });
         if (!user) return res.status(404).send("❌ غير موجود");
@@ -115,4 +134,12 @@ exports.getMyInvites = async (req, res) => {
         console.error("❌ GET MY INVITES ERROR:", err);
         res.status(500).send("❌ خطأ في السيرفر");
     }
+};
+
+// 👈 تصدير الدوال مع ربطها بـ verifyToken
+module.exports = {
+    verifyToken,
+    confirmReferral,
+    registerReferral,
+    getMyInvites
 };
