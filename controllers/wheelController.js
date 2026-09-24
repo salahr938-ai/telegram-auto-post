@@ -34,7 +34,8 @@ exports.getWheelStatus = async (req, res) => {
                 referralCode: finalCode, 
                 referredBy: "", 
                 referralStatus: "none",
-                nextSpinTime: now, // متاحة فوراً عند التسجيل لأول مرة
+                friendPoints: 0.0, // 👈 تهيئة رصيد الأصدقاء الجديد
+                nextSpinTime: now, 
                 adsWatchedToday: 0,
                 adsResetTime: new Date(now.getTime() + 24 * 60 * 60 * 1000),
                 isRegistered: false,
@@ -63,7 +64,11 @@ exports.getWheelStatus = async (req, res) => {
             maxParticipants: 500,
             isRegistered: account.isRegistered || false,
             adsWatchedToday: account.adsWatchedToday || 0,
-            nextSpinTime: account.nextSpinTime || now
+            nextSpinTime: account.nextSpinTime || now,
+            friendPoints: account.friendPoints || 0.0, // 👈 إرسال رصيد الأصدقاء للتطبيق
+            referralCode: account.referralCode,
+            referredBy: account.referredBy,
+            referralStatus: account.referralStatus
         });
     } catch (err) {
         console.error(err);
@@ -77,28 +82,25 @@ exports.spinWheel = async (req, res) => {
         const userId = req.user && req.user.uid;
         if (!userId) return res.status(400).send("❌ unauthorized userId");
 
-        const { isAdReward } = req.body; // هل هذه اللفة ناتجة عن مشاهدة إعلان؟
+        const { isAdReward } = req.body; 
         const account = await WheelUser.findOne({ userId });
         if (!account) return res.status(404).send("❌ غير موجود");
 
         const now = new Date();
 
         if (isAdReward) {
-            // التحقق من حد الـ 3 إعلانات يومياً
             if (account.adsWatchedToday >= 3) {
                 return res.status(400).send("⚠️ لقد استنفذت الحد الأقصى لإعلانات اليوم (3/3)");
             }
             account.adsWatchedToday += 1;
         } else {
-            // لفة عادية: التحقق من توفر المحاولة أو انتهاء مؤقت الـ 3 ساعات
             if (account.spinsLeft <= 0 && now < account.nextSpinTime) {
                 return res.status(400).send("⚠️ يجدر بك الانتظار حتى ينتهي مؤقت الـ 3 ساعات");
             }
-            // إذا كانت محاولة مجانية متاحة، نخصمها ونضبط مؤقت الـ 3 ساعات القادمة
             if (account.spinsLeft > 0) {
                 account.spinsLeft -= 1;
             }
-            account.nextSpinTime = new Date(now.getTime() + 3 * 60 * 60 * 1000); // 3 ساعات
+            account.nextSpinTime = new Date(now.getTime() + 3 * 60 * 60 * 1000); 
         }
 
         const prizes = ["10", "20", "30", "40", "50", "60"];
@@ -108,11 +110,12 @@ exports.spinWheel = async (req, res) => {
         account.points += reward;
         account.lastPrize = `${reward}`;
 
-        // التحقق من وصول المستخدم إلى 500 نقطة لتسجيله في مسابقة الـ 3$
+        // التحقق من وصول المستخدم إلى 500 نقطة لتسجيله في المسابقة
         if (account.points >= 500 && !account.isRegistered) {
             account.isRegistered = true;
-            // هنا يمكنك زيادة عداد المشاركين العام في قاعدة البيانات أو جدول المسابقات
             account.participantsCount = (account.participantsCount || 0) + 1;
+            // ملاحظة: تم إزالة المنح التلقائي هنا، وسيتم اعتماد مكافأة الـ 0.20 يدوياً 
+            // عبر دالة confirmReferral عندما يفوز الصديق ضمن الـ 3 فائزين.
         }
 
         await account.save();

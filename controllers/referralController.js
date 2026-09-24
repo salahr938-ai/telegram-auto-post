@@ -1,62 +1,72 @@
 const WheelUser = require("../models/WheelUser");
 const PointsHistory = require("../models/PointsHistory");
-// استيراد المتغيرات الأساسية (تأكد من تعديل المسارات إذا لزم الأمر)
 const firestore = require("../firebase");
 const { generateReferralCode } = require("../utils/crypto"); 
-// افترضنا أن isDbConnected معرفة في مكان مركزي أو يتم تمريرها
 const { getDbStatus } = require("../config/dbStatus");
+
+// ================= 1. تأكيد الإحالة ومنح 0.20 للداعي عند الفوز =================
 exports.confirmReferral = async (req, res) => {
- if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
-  try {
-    const { userId } = req.body;
-    if (!userId) return res.status(400).send("❌ userId required");
-
-    const user = await WheelUser.findOne({ userId });
-    if (!user) return res.status(404).send("❌ المستخدم غير موجود");
-    
-    if (!user.referredBy || user.referralStatus !== "pending") {
-       return res.status(400).send("❌ لا يمكنك التحصيل: إما لا توجد دعوة أو تم التحصيل مسبقاً");
-    }
-
-    user.points += 5000;
-    user.referralStatus = "confirmed";
-    await user.save();
-
-    await PointsHistory.create({
-      userId: userId,
-      amount: 5000,
-      source: 'referral',
-      description: 'مكافأة تفعيل كود الإحالة 🎉'
-    });
-
-    const inviter = await WheelUser.findOne({ referralCode: user.referredBy });
-    if (inviter) {
-      inviter.points += 5000;
-      await inviter.save();
-      await PointsHistory.create({
-        userId: inviter.userId, 
-        amount: 5000,
-        source: 'referral',
-        description: 'مكافأة دعوة صديق بنجاح 👥'
-      });
-    }
-
+    if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
-        await firestore.collection("users").doc(userId).update({ referralStatus: "confirmed" });
-    } catch (e) { console.log("⚠️ Firebase update skipped"); }
+        const { userId } = req.body; // معرف الصديق المدعو
+        if (!userId) return res.status(400).send("❌ userId required");
 
-    res.json({ success: true, newPoints: user.points });
-  } catch (err) {
-    console.log("❌ REFERRAL ERROR:", err);
-    res.status(500).send("❌ خطأ في الخادم");
-  }
+        const user = await WheelUser.findOne({ userId });
+        if (!user) return res.status(404).send("❌ المستخدم غير موجود");
+        
+        if (!user.referredBy || user.referralStatus !== "pending") {
+           return res.status(400).send("❌ لا يمكنك التحصيل: إما لا توجد دعوة أو تم التحصيل مسبقاً");
+        }
+
+        // 🎯 الشرط: التأكد أن الصديق وصل لـ 500 نقطة وحقق الفوز في المسابقة
+        if (user.points < 500) {
+            return res.status(400).send("❌ لم يصل المستخدم بعد إلى 500 نقطة المطلوبة");
+        }
+
+        // تحديث حالة المدعو ليصبح الفوز مؤكداً لديه
+        user.referralStatus = "confirmed";
+        await user.save();
+
+        // 💰 إضافة 0.20 إلى "رصيد الأصدقاء" (friendPoints) الخاص بالداعي (Inviter)
+        const inviter = await WheelUser.findOne({ referralCode: user.referredBy });
+        if (inviter) {
+            // زيادة الرصيد بصيغة عشرية صحيحة (تجنب مشاكل الأرقام العشرية في جافاسكريبت)
+            inviter.friendPoints = Number(((inviter.friendPoints || 0) + 0.20).toFixed(2));
+            await inviter.save();
+
+            // تسجيل العملية في التاريخ
+            await PointsHistory.create({
+                userId: inviter.userId, 
+                amount: 0.20,
+                source: 'friend_points',
+                description: 'مكافأة نجاح ودعوة صديق في المسابقة 🎉'
+            });
+        }
+
+        // مزامنة الحالة مع فايرستور
+        try {
+            await firestore.collection("users").doc(userId).update({ referralStatus: "confirmed" });
+        } catch (e) { console.log("⚠️ Firebase update skipped"); }
+
+        res.json({ success: true, message: "تم تأكيد فوز الإحالة بنجاح!" });
+    } catch (err) {
+        console.log("❌ REFERRAL ERROR:", err);
+        res.status(500).send("❌ خطأ في الخادم");
+    }
 };
 
+// ================= 2. تسجيل الإحالة عند استخدام الكود لأول مرة =================
 exports.registerReferral = async (req, res) => {
     if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
         const { userId, referrerCode } = req.body;
         if (!userId || !referrerCode) return res.status(400).send("❌ بيانات ناقصة");
+
+        // حماية: منع المستخدم من استخدام كود الإحالة الخاص به لنفسه
+        const selfCheck = await WheelUser.findOne({ userId });
+        if (selfCheck && selfCheck.referralCode === referrerCode) {
+            return res.status(400).send("❌ لا يمكنك استخدام كود الإحالة الخاص بك");
+        }
 
         let user = await WheelUser.findOne({ userId });
         
@@ -67,7 +77,8 @@ exports.registerReferral = async (req, res) => {
                 spinsLeft: 3,
                 referralCode: finalCode,
                 referredBy: referrerCode,
-                referralStatus: "pending"
+                referralStatus: "pending",
+                friendPoints: 0.0 // تهيئة رصيد الأصدقاء
             });
             return res.json({ success: true, message: "تم إنشاء الحساب وتسجيل الإحالة المعلقة بنجاح 🎉" });
         }
@@ -86,8 +97,9 @@ exports.registerReferral = async (req, res) => {
     }
 };
 
+// ================= 3. جلب عدد الإحالات (معلقة ومؤكدة) =================
 exports.getMyInvites = async (req, res) => {
-if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
+    if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
         const { userId } = req.query;
         if (!userId) return res.status(400).send("❌ userId required");
@@ -100,6 +112,7 @@ if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
 
         res.json({ pendingCount, confirmedCount });
     } catch (err) {
+        console.error("❌ GET MY INVITES ERROR:", err);
         res.status(500).send("❌ خطأ في السيرفر");
     }
 };
