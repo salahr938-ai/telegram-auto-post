@@ -189,17 +189,20 @@ const Contest = require("../models/Contest");
 exports.getContestInfo = async (req, res) => {
     if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
-        // البحث عن الدورة النشطة حالياً، أو إنشاء الأولى إن لمג تكن موجودة
+        // البحث عن الدورة النشطة حالياً، أو إنشاء الأولى إن لم تكن موجودة
         let activeContest = await Contest.findOne({ status: 'active' });
         if (!activeContest) {
             activeContest = await Contest.create({
                 contestNumber: 1,
                 participantsCount: 0,
-                maxParticipants: 30,
+                maxParticipants: 30, // أو 500 حسب رغبتك
                 status: 'active',
                 winners: []
             });
         }
+
+        // 💡 السطر الجديد والمهم: حساب عدد المستخدمين المسجلين الفعليين من جدول WheelUser مباشرة
+        const realParticipantsCount = await WheelUser.countDocuments({ isRegistered: true });
 
         // جلب آخر الدورات المنتهية لعرضها في سجل الفائزين
         const pastContests = await Contest.find({ status: 'completed' })
@@ -208,7 +211,7 @@ exports.getContestInfo = async (req, res) => {
 
         res.json({
             currentContestNumber: activeContest.contestNumber,
-            participantsCount: activeContest.participantsCount,
+            participantsCount: realParticipantsCount, // 👈 إرسال العدد الحقيقي المحدث هنا
             maxParticipants: activeContest.maxParticipants,
             winners: activeContest.winners || [],
             pastContests: pastContests
