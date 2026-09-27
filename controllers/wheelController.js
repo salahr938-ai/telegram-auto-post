@@ -61,7 +61,7 @@ exports.getWheelStatus = async (req, res) => {
             spinsLeft: account.spinsLeft,
             lastPrize: account.lastPrize || "0",
             participantsCount: account.participantsCount || 0,
-            maxParticipants: 500,
+            maxParticipants: 30,
             isRegistered: account.isRegistered || false,
             adsWatchedToday: account.adsWatchedToday || 0,
             nextSpinTime: account.nextSpinTime || now,
@@ -111,7 +111,7 @@ exports.spinWheel = async (req, res) => {
         account.lastPrize = `${reward}`;
 
   // التحقق من وصول المستخدم إلى 500 نقطة لتسجيله في المسابقة
-        if (account.points >= 500 && !account.isRegistered) {
+        if (account.points >= 30 && !account.isRegistered) {
             account.isRegistered = true;
             
             // جلب الدورة النشطة وتحديث عدد المشتركين
@@ -120,7 +120,7 @@ exports.spinWheel = async (req, res) => {
                 activeContest = await Contest.create({ 
                     contestNumber: 1, 
                     participantsCount: 0, 
-                    maxParticipants: 500,
+                    maxParticipants: 4,
                     status: 'active' 
                 });
             }
@@ -151,7 +151,7 @@ exports.spinWheel = async (req, res) => {
                 await Contest.create({
                     contestNumber: activeContest.contestNumber + 1,
                     participantsCount: 0,
-                    maxParticipants: 500,
+                    maxParticipants: 30,
                     status: 'active'
                 });
             } else {
@@ -195,7 +195,7 @@ exports.getContestInfo = async (req, res) => {
             activeContest = await Contest.create({
                 contestNumber: 1,
                 participantsCount: 0,
-                maxParticipants: 500,
+                maxParticipants: 30,
                 status: 'active',
                 winners: []
             });
