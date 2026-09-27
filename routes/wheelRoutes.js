@@ -10,6 +10,7 @@ router.get("/status", verifyFirebaseToken, wheelController.getWheelStatus);
 router.post("/spin", verifyFirebaseToken, wheelController.spinWheel);
 
 // 👈 أضف المسار الجديد هنا:
-router.get("/contest/info", verifyFirebaseToken, wheelController.getContestInfo);
+// ✅ اجعله مساراً عاماً متاحاً للتطبيق مباشرة
+router.get("/contest/info", wheelController.getContestInfo);
 
 module.exports = router;
