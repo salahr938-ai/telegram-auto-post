@@ -190,11 +190,20 @@ exports.getContestInfo = async (req, res) => {
     if (!getDbStatus()) return res.status(503).send("⏳ DB not ready");
     try {
         let activeContest = await Contest.findOne({ status: 'active' });
+
+        // 🔍 أضف الأسطر هنا للتشخيص
+        console.log("===== CONTEST INFO =====");
+        console.log("Contest ID:", activeContest?._id);
+        console.log("Contest Number:", activeContest?.contestNumber);
+        console.log("Participants:", activeContest?.participantsCount);
+        console.log("Max:", activeContest?.maxParticipants);
+        console.log("Status:", activeContest?.status);
+
         if (!activeContest) {
             activeContest = await Contest.create({
                 contestNumber: 1,
                 participantsCount: 0,
-                maxParticipants: 4, // اجعلها متطابقة مع العجلة للتجربة
+                maxParticipants: 4,
                 status: 'active',
                 winners: []
             });
@@ -206,7 +215,7 @@ exports.getContestInfo = async (req, res) => {
 
         res.json({
             currentContestNumber: activeContest.contestNumber,
-            participantsCount: activeContest.participantsCount, // 👈 قراءة مباشرة من مستند المسابقة النشطة
+            participantsCount: activeContest.participantsCount,
             maxParticipants: activeContest.maxParticipants,
             winners: activeContest.winners || [],
             pastContests: pastContests
