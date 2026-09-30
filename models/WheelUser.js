@@ -30,7 +30,11 @@ const wheelSchema = new mongoose.Schema({
 
   // 🧩 خريطة مستويات لعبة المطابقة (Match-3)
   unlockedLevel: { type: Number, default: 1 },           // أعلى مستوى متاح للمستخدم
-  levelCooldowns: { type: Map, of: Date, default: {} }
+  levelCooldowns: { type: Map, of: Date, default: {} },
+
+  // 🛡️ حقول حماية إعلانات العجلة المؤقتة
+  pendingAdToken: { type: String, default: null },
+  adTokenExpiresAt: { type: Date, default: null }
 }, { timestamps: true });
 
 // تصدير الموديل لكي نستخدمه في المسارات (Routes)

@@ -1,10 +1,10 @@
+// routes/referralRoutes.js
 const express = require("express");
 const router = express.Router();
-const referralController = require("../controllers/referralController");
+const verifyFirebaseToken = require("../middlewares/authMiddleware");
+const { registerReferral, getMyInvites } = require("../controllers/referralController");
 
-// 🛡️ ربط كل مسار بدالة التحقق من التوكن (verifyToken) الموجودة في الكنترولر أولاً
-router.post("/confirm", referralController.verifyToken, referralController.confirmReferral);
-router.post("/register", referralController.verifyToken, referralController.registerReferral);
-router.get("/my-invites", referralController.verifyToken, referralController.getMyInvites);
+router.post("/register", verifyFirebaseToken, registerReferral);
+router.get("/my-invites", verifyFirebaseToken, getMyInvites);
 
 module.exports = router;
