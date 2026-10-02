@@ -1,9 +1,15 @@
 // utils/wheelAccount.js
 // دالة واحدة لإنشاء حساب العجلة (تُستعمل في العجلة والإحالات) لتفادي حسابات ناقصة
 const WheelUser = require("../models/WheelUser");
-const { generateReferralCode } = require("./crypto");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+// دالة توليد كود إحالة فريد وبسيط
+function generateReferralCode(userId) {
+  const cleanId = userId ? userId.toString().slice(-6).toUpperCase() : "USER";
+  const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `R${cleanId}${randomStr}`;
+}
 
 async function ensureAccount(userId) {
   const now = new Date();
