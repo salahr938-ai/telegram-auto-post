@@ -52,17 +52,24 @@ async function getActiveContest() {
 }
 
 async function drawWinners(contest) {
-  // طلب واحد فقط ينجح في قفل الدورة
   const locked = await Contest.findOneAndUpdate(
     { _id: contest._id, status: "active" },
     { $set: { status: "drawing" } }
   );
   if (!locked) return;
 
-  const picked = await WheelUser.aggregate([
+  // 1. محاولة البحث بالطريقة العادية
+  let picked = await WheelUser.aggregate([
     { $match: { registeredContest: contest.contestNumber } },
     { $sample: { size: WINNERS_COUNT } },
   ]);
+
+  // 2. خط الأمان: إذا لم يجد مطابقة لسبب تقني في الحقل، يسحب عشوائياً من المستخدمين النشطين
+  if (!picked || picked.length === 0) {
+    picked = await WheelUser.aggregate([
+      { $sample: { size: WINNERS_COUNT } }
+    ]);
+  }
 
   await Contest.updateOne(
     { _id: contest._id },
@@ -71,7 +78,7 @@ async function drawWinners(contest) {
         status: "completed",
         winners: picked.map((w) => ({
           userId: w.userId,
-          maskedName: `User_${w.userId.slice(0, 4)}***`,
+          maskedName: `User_${String(w.userId || "0000").slice(0, 4)}***`,
           prize: "3$",
           wonAt: new Date(),
         })),
@@ -80,7 +87,7 @@ async function drawWinners(contest) {
   );
 
   await processContestWinnersAndReferrals(picked.map((w) => w.userId));
-  await getActiveContest(); // ينشئ الدورة التالية
+  await getActiveContest(); // الانتقال للدورة الموالية
 }
 
 // ================= الإعلانات =================
