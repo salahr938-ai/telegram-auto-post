@@ -370,10 +370,11 @@ exports.spinWheel = async (req, res) => {
   }
 };
 
-// ================= معلومات المسابقة (عام، بلا بيانات شخصية) =================
+// ================= معلومات المسابقة (عام، مع إرجاع userId للمقارنة محلياً) =================
 const toPublic = (c) => ({
   contestNumber: c.contestNumber,
   winners: (c.winners || []).map((w) => ({
+    userId: w.userId, // أضفنا هذا السطر لكي يتمكن التطبيق من مقارنته بمعرف المستخدم الحالي
     maskedName: w.maskedName,
     prize: w.prize,
     wonAt: w.wonAt,
