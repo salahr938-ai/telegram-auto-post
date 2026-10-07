@@ -7,7 +7,7 @@ const verifyFirebaseToken = require("../middlewares/authMiddleware");
 router.get("/status", verifyFirebaseToken, wheelController.getWheelStatus);
 
 // 🛡️ مسار جديد: طلب تصريح لمشاهدة إعلان (محمي بـ Firebase Token)
-router.post("/request-ad", verifyFirebaseToken, wheelController.requestAdSession);
+router.post("/ad-session", verifyFirebaseToken, wheelController.requestAdSession);
 
 // حماية مسار تدوير العجلة (يعالج اللفة العادية ولفة الإعلان معاً)
 router.post("/spin", verifyFirebaseToken, wheelController.spinWheel);
