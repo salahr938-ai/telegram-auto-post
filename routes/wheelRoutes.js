@@ -15,4 +15,7 @@ router.post("/spin", verifyFirebaseToken, wheelController.spinWheel);
 // مسار عام غير محمي لتحديثات لوحة الفائزين
 router.get("/contest/info", wheelController.getContestInfo);
 
+// 🛡️ AdMob SSV: جوجل هي التي تستدعيه (بدون verifyFirebaseToken)
+router.get("/ssv", wheelController.adSsvCallback);
+
 module.exports = router;
