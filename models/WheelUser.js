@@ -34,8 +34,14 @@ const wheelSchema = new mongoose.Schema({
 
   // 🛡️ حقول حماية إعلانات العجلة المؤقتة
   pendingAdToken: { type: String, default: null },
-  adTokenExpiresAt: { type: Date, default: null }
+  adTokenExpiresAt: { type: Date, default: null },
+  adVerified: { type: Boolean, default: false },
+registeredContest: { type: Number, default: 0 },
+friendPoints: { type: Number, default: 0 },
 }, { timestamps: true });
+
+
+
 
 // تصدير الموديل لكي نستخدمه في المسارات (Routes)
 module.exports = mongoose.model("WheelUser", wheelSchema);
