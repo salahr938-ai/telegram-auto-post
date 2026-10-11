@@ -174,19 +174,19 @@ async function verifyAdmobSsv(originalUrl) {
 }
 
 exports.adSsvCallback = async (req, res) => {
-  console.log("SSV hit:", req.originalUrl);
   try {
     const ok = await verifyAdmobSsv(req.originalUrl);
-    console.log("SSV signature valid:", ok);
     if (!ok) return res.sendStatus(403);
 
     const { user_id, custom_data, transaction_id } = req.query;
-    if (!user_id || !custom_data || !transaction_id) return res.sendStatus(400);
+
+    // طلب اختبار من AdMob (بدون بيانات مخصصة): توقيعه سليم، نرد 200 فقط
+    if (!user_id || !custom_data || !transaction_id) return res.sendStatus(200);
 
     try {
       await AdTransaction.create({ transactionId: String(transaction_id) });
     } catch (e) {
-      if (e.code === 11000) return res.sendStatus(200); // معاملة مكررة
+      if (e.code === 11000) return res.sendStatus(200);
       throw e;
     }
 
