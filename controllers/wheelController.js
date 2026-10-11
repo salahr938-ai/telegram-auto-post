@@ -174,8 +174,11 @@ async function verifyAdmobSsv(originalUrl) {
 }
 
 exports.adSsvCallback = async (req, res) => {
+  console.log("SSV hit:", req.originalUrl);
   try {
-    if (!(await verifyAdmobSsv(req.originalUrl))) return res.sendStatus(403);
+    const ok = await verifyAdmobSsv(req.originalUrl);
+    console.log("SSV signature valid:", ok);
+    if (!ok) return res.sendStatus(403);
 
     const { user_id, custom_data, transaction_id } = req.query;
     if (!user_id || !custom_data || !transaction_id) return res.sendStatus(400);
