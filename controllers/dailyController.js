@@ -87,17 +87,16 @@ exports.likeDua = async (req, res) => {
             return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
         }
 
-        // 1. منع الإعجاب بالنفس
+        // منع الإعجاب بالنفس
         if (dua.userId === user.userId) {
             return res.status(400).json({ success: false, message: "لا يمكنك الإعجاب بدعائك الخاص!" });
         }
 
-        // 2. التحقق مما إذا كان قد أعجب به مسبقاً
+        // التحقق مما إذا كان قد أعجب به مسبقاً
         if (dua.likedBy && dua.likedBy.includes(user._id.toString())) {
             return res.status(400).json({ success: false, message: "لقد اعجبت بهذا الدعاء مسبقاً" });
         }
 
-        // 3. التحقق من حصة الإعجابات بالساعة (مثلاً حد أقصى للإعجابات في الساعة إن وجد، أو تخطيها)
         // تحديث نقاط المتفاعل (+5 نقاط)
         user.points = (user.points || 0) + 5;
         await user.save();
@@ -121,7 +120,7 @@ exports.likeDua = async (req, res) => {
         dua.likesCount = (dua.likesCount || 0) + 1;
         await dua.save();
 
-        // 4. منح صاحب الدعاء النقاط (+10 نقاط) وتحديث إحصائياته
+        // منح صاحب الدعاء النقاط (+10 نقاط) وتحديث إحصائياته
         const duaAuthor = await WheelUser.findOne({ userId: dua.userId });
         if (duaAuthor) {
             duaAuthor.totalLikesReceived = (duaAuthor.totalLikesReceived || 0) + 1;
