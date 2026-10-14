@@ -1,5 +1,6 @@
 const WheelUser = require('../models/WheelUser'); // استدعاء الموديل المحدث الخاص بك
 const Dua = require('../models/duaModel');
+const PointsHistory = require('../models/PointsHistory');
 
 // دالة لجلب أو إنشاء مستخدم الأدعية من جدول WheelUser باستخدام الـ uid القادم من التوكن
 async function getOrCreateDuaUser(decodedToken) {
@@ -68,7 +69,7 @@ exports.likeDua = async (req, res) => {
             return res.status(400).json({ success: false, message: 'لا يمكنك الإعجاب بدعائك الخاص' });
         }
 
-        // التحقق من حصة الإعجابات الساعية (إعجابين كل ساعة)
+        // فحص حصة الإعجابات الساعية (إعجابين كل ساعة)
         const now = new Date();
         const lastReset = user.lastLikeResetTime ? new Date(user.lastLikeResetTime) : now;
         const hoursSinceReset = (now.getTime() - lastReset.getTime()) / (1000 * 60 * 60);
@@ -85,29 +86,46 @@ exports.likeDua = async (req, res) => {
             });
         }
 
-        // التحقق مما إذا كان قد أعجب بهذا الدعاء مسبقاً
+        // فحص الإعجاب السابق
         if (dua.likedBy.includes(user._id)) {
             return res.status(400).json({ success: false, message: 'لقد أعجبت بهذا الدعاء مسبقاً' });
         }
 
-        // تسجيل الإعجاب للمتفاعل ومنحه 5 نقاط تضاف لرصيد النقاط العام `points`
+        // 1. تحديث بيانات المتفاعل ومنحه 5 نقاط
         user.likesGivenThisHour = (user.likesGivenThisHour || 0) + 1;
         user.points = (user.points || 0) + 5; 
         await user.save();
 
-        // تحديث إحصائيات الدعاء
+        // 📝 تسجيل النقاط للمتفاعل في PointsHistory (مطابق تماماً للـ Schema)
+        await PointsHistory.create({
+            userId: user._id.toString(),
+            amount: 5,
+            source: 'dua_like',
+            description: 'تفاعل وإعجاب بدعاء مبارك 🤲'
+        });
+
+        // 2. تحديث إحصائيات الدعاء
         dua.likedBy.push(user._id);
         dua.likesCount += 1;
         await dua.save();
 
-        // تحديث إحصائيات ناشر الدعاء التراكمية
+        // 3. تحديث بيانات الناشر ومنحه 10 نقاط
         const duaAuthor = await WheelUser.findById(dua.userId);
         if (duaAuthor) {
             duaAuthor.totalLikesReceived = (duaAuthor.totalLikesReceived || 0) + 1;
+            duaAuthor.points = (duaAuthor.points || 0) + 10;
             await duaAuthor.save();
+
+            // 📝 تسجيل النقاط للناشر في PointsHistory
+            await PointsHistory.create({
+                userId: duaAuthor._id.toString(),
+                amount: 10,
+                source: 'dua_like_received',
+                description: 'تلقي إعجاب على دعاء منتشر 🌟'
+            });
         }
 
-        // شرط الحذف المبكر (إذا وصل الدعاء إلى 8 إعجابات، يُحذف فوراً قبل الـ 6 ساعات)
+        // شرط الحذف المبكر عند الوصول لـ 8 إعجابات
         const TARGET_LIKES_FOR_EARLY_DELETE = 8;
         let isDeletedEarly = false;
 
