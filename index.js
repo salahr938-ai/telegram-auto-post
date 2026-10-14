@@ -22,6 +22,7 @@ const scratchRoutes = require('./routes/scratchRoutes');
 const surpriseBoxRoutes = require("./routes/surpriseBoxRoutes");
 const match3Routes = require("./routes/match3Routes");
 const waterSortRoutes = require("./routes/waterSortRoutes");
+const duaRoutes = require("./routes/duaRoutes");
 // ==========================================
 // 2. إعدادات التطبيق (App Setup)
 // ==========================================
@@ -44,6 +45,7 @@ app.use(express.json());
 // 3. تعريف المسارات (Routes)
 
 // المسارات المنظمة عبر الـ Router
+app.use("/api/dua", duaRoutes);
 app.use("/api/referral", referralRoutes);
 app.use("/api/watersort", waterSortRoutes);
 app.use("/api/wheel", wheelRoutes);

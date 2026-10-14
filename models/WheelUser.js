@@ -32,6 +32,13 @@ const wheelSchema = new mongoose.Schema({
   unlockedLevel: { type: Number, default: 1 },           // أعلى مستوى متاح للمستخدم
   levelCooldowns: { type: Map, of: Date, default: {} },
 
+  // 🤲 حقول ميزة الأدعية والسنن الجديدة
+  totalDuasPublished: { type: Number, default: 0 },
+  totalLikesReceived: { type: Number, default: 0 },
+  lastPostDate: { type: Date, default: null },
+  likesGivenThisHour: { type: Number, default: 0 },
+  lastLikeResetTime: { type: Date, default: Date.now },
+
   // 🛡️ حقول حماية إعلانات العجلة المؤقتة
   pendingAdToken: { type: String, default: null },
   adTokenExpiresAt: { type: Date, default: null },
