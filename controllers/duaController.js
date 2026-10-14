@@ -1,4 +1,4 @@
-const WheelUser = require('../models/wheelModel'); // استدعاء الموديل المحدث الخاص بك
+const WheelUser = require('../models/WheelUser'); // استدعاء الموديل المحدث الخاص بك
 const Dua = require('../models/duaModel');
 
 // دالة لجلب أو إنشاء مستخدم الأدعية من جدول WheelUser باستخدام الـ uid القادم من التوكن
