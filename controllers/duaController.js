@@ -211,12 +211,22 @@ exports.likeDua = async (req, res) => {
 // ===================================
 exports.getDuasFeed = async (req, res) => {
     try {
-        const duas = await Dua.find()
-            .sort({ createdAt: -1 })
-            .limit(100)
-            .select('-likedBy');
+        // معرّف المستخدم الحالي ليُحسب لكل دعاء هل أعجب به (likedByMe)
+        let myId = null;
+        if (req.user && req.user.uid) {
+            const me = await WheelUser.findOne({ userId: req.user.uid }).select('_id');
+            myId = me ? me._id.toString() : null;
+        }
 
-        res.status(200).json({ success: true, duas });
+        const duas = await Dua.find().sort({ createdAt: -1 }).limit(100).lean();
+
+        // لا نرسل قائمة likedBy كاملة (خصوصية وحجم)، فقط likedByMe
+        const result = duas.map(({ likedBy, ...rest }) => ({
+            ...rest,
+            likedByMe: myId ? (likedBy || []).some((id) => id.toString() === myId) : false
+        }));
+
+        res.status(200).json({ success: true, duas: result });
     } catch (error) {
         console.error('❌ GET DUAS FEED ERROR:', error);
         res.status(500).json({ success: false, message: 'خطأ في السيرفر' });
