@@ -39,6 +39,20 @@ async function getNickname(uid) {
     }
 }
 
+// حالة حصة الإعجابات للمستخدم: كم بقي له، وبعد كم مللي ثانية تتجدد (إن استُنفدت).
+// نرسل المدة المتبقية (وليس وقتًا مطلقًا) حتى لا يتأثر العدّاد بضبط ساعة الهاتف.
+function computeLikeQuota(user) {
+    const now = Date.now();
+    const windowStart = user && user.lastLikeResetTime ? new Date(user.lastLikeResetTime).getTime() : 0;
+    const windowActive = windowStart > 0 && now - windowStart < HOUR_MS;
+    const used = windowActive ? (user.likesGivenThisHour || 0) : 0;
+    const remaining = Math.max(0, MAX_LIKES_PER_HOUR - used);
+    return {
+        likesRemaining: remaining,
+        likesResetInMs: windowActive && remaining === 0 ? windowStart + HOUR_MS - now : 0
+    };
+}
+
 // تسجيل النقاط في السجل. فشل التسجيل لا يلغي العملية.
 // نستعمل Firebase uid (وليس _id) ليظهر في سجل الأرباح في التطبيق.
 async function logPoints(firebaseUid, amount, source, description) {
@@ -230,8 +244,10 @@ exports.getDuasFeed = async (req, res) => {
     try {
         // معرّف المستخدم الحالي ليُحسب لكل دعاء هل أعجب به (likedByMe)
         let myId = null;
+        let me = null;
         if (req.user && req.user.uid) {
-            const me = await WheelUser.findOne({ userId: req.user.uid }).select('_id');
+            me = await WheelUser.findOne({ userId: req.user.uid })
+                .select('_id likesGivenThisHour lastLikeResetTime');
             myId = me ? me._id.toString() : null;
         }
 
@@ -243,7 +259,7 @@ exports.getDuasFeed = async (req, res) => {
             likedByMe: myId ? (likedBy || []).some((id) => id.toString() === myId) : false
         }));
 
-        res.status(200).json({ success: true, duas: result });
+        res.status(200).json({ success: true, duas: result, ...computeLikeQuota(me) });
     } catch (error) {
         console.error('❌ GET DUAS FEED ERROR:', error);
         res.status(500).json({ success: false, message: 'خطأ في السيرفر' });
