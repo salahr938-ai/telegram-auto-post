@@ -1,161 +1,224 @@
-const WheelUser = require('../models/WheelUser'); // استدعاء الموديل المحدث الخاص بك
-const Dua = require('../models/duaModel');
+const mongoose = require('mongoose');
+const WheelUser = require('../models/WheelUser');
+const Dua = require('../models/Dua');
 const PointsHistory = require('../models/PointsHistory');
 
-// دالة لجلب أو إنشاء مستخدم الأدعية من جدول WheelUser باستخدام الـ uid القادم من التوكن
+const POST_COOLDOWN_HOURS = 6;
+const MAX_CONTENT_LENGTH = 500;
+const MAX_LIKES_PER_HOUR = 2;
+const TARGET_LIKES_FOR_EARLY_DELETE = 8;
+const LIKER_POINTS = 5;
+const AUTHOR_POINTS = 10;
+const HOUR_MS = 60 * 60 * 1000;
+
+// جلب أو إنشاء مستخدم من جدول WheelUser باستخدام الـ uid القادم من التوكن
 async function getOrCreateDuaUser(decodedToken) {
     let user = await WheelUser.findOne({ userId: decodedToken.uid });
     if (!user) {
-        user = new WheelUser({
+        user = await WheelUser.create({
             userId: decodedToken.uid,
             name: decodedToken.name || decodedToken.email || 'مستخدم جديد'
         });
-        await user.save();
     }
     return user;
 }
 
-// 1. مسار نشر دعاء جديد (يتطلب مشاهدة إعلان مكافأة في التطبيق أولاً)
+// تسجيل النقاط في السجل. فشل التسجيل لا يلغي العملية.
+// نستعمل Firebase uid (وليس _id) ليظهر في سجل الأرباح في التطبيق.
+async function logPoints(firebaseUid, amount, source, description) {
+    try {
+        await PointsHistory.create({ userId: firebaseUid, amount, source, description });
+    } catch (err) {
+        console.error('❌ PointsHistory error:', err.message);
+    }
+}
+
+// ===================================
+// 1. نشر دعاء جديد (مهلة 6 ساعات)
+// ===================================
 exports.publishDua = async (req, res) => {
     try {
-        const { content, category } = req.body;
-        const user = await getOrCreateDuaUser(req.user);
+        const content = typeof req.body.content === 'string' ? req.body.content.trim() : '';
+        const category = typeof req.body.category === 'string' ? req.body.category.trim() : '';
 
-        // فحص مهلة الـ 6 ساعات بين كل منشور وآخر
-        if (user.lastPostDate) {
-            const hoursSinceLastPost = (Date.now() - new Date(user.lastPostDate).getTime()) / (1000 * 60 * 60);
-            if (hoursSinceLastPost < 6) {
-                const remainingHours = (6 - hoursSinceLastPost).toFixed(1);
-                return res.status(400).json({ 
-                    success: false, 
-                    message: `يجب عليك الانتظار لمدة ${remainingHours} ساعات لنشر دعاء جديد.` 
-                });
-            }
+        if (!content) {
+            return res.status(400).json({ success: false, message: 'محتوى الدعاء مطلوب' });
+        }
+        if (content.length > MAX_CONTENT_LENGTH) {
+            return res.status(400).json({
+                success: false,
+                message: `الدعاء طويل جدًا (الحد الأقصى ${MAX_CONTENT_LENGTH} حرف)`
+            });
         }
 
-        // إنشاء الدعاء الجديد
-        const newDua = new Dua({
-            userId: user._id,
-            authorName: user.name || 'مستخدم',
-            content,
-            category: category || 'دعاء'
-        });
-        await newDua.save();
+        const user = await getOrCreateDuaUser(req.user);
+        const now = new Date();
+        const cooldownLimit = new Date(now.getTime() - POST_COOLDOWN_HOURS * HOUR_MS);
 
-        // تحديث وقت آخر نشر وإجمالي الأدعية
-        user.lastPostDate = new Date();
-        user.totalDuasPublished = (user.totalDuasPublished || 0) + 1;
-        await user.save();
+        // حجز الدور بشكل ذري: يمنع نشر دعاءين بطلبين متزامنين
+        const reserved = await WheelUser.findOneAndUpdate(
+            {
+                _id: user._id,
+                $or: [{ lastPostDate: null }, { lastPostDate: { $exists: false } }, { lastPostDate: { $lte: cooldownLimit } }]
+            },
+            { $set: { lastPostDate: now }, $inc: { totalDuasPublished: 1 } },
+            { new: false }
+        );
+
+        if (!reserved) {
+            const hoursSince = (Date.now() - new Date(user.lastPostDate).getTime()) / HOUR_MS;
+            const remaining = Math.max(0, POST_COOLDOWN_HOURS - hoursSince).toFixed(1);
+            return res.status(400).json({
+                success: false,
+                message: `يجب عليك الانتظار لمدة ${remaining} ساعات لنشر دعاء جديد.`
+            });
+        }
+
+        try {
+            await Dua.create({
+                userId: user._id,
+                authorName: user.name || 'مستخدم',
+                content,
+                category: category || 'دعاء'
+            });
+        } catch (createErr) {
+            // فشل الإنشاء: نعيد المهلة والعدّاد كما كانا
+            await WheelUser.updateOne(
+                { _id: user._id },
+                { $set: { lastPostDate: reserved.lastPostDate || null }, $inc: { totalDuasPublished: -1 } }
+            );
+            throw createErr;
+        }
 
         res.status(200).json({ success: true, message: 'تم نشر الدعاء بنجاح' });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('❌ PUBLISH DUA ERROR:', error);
+        res.status(500).json({ success: false, message: 'خطأ داخلي في السيرفر' });
     }
 };
 
-// 2. مسار الإعجاب بدعاء (مع تقييد إعجابين كل ساعة + منح 5 نقاط للمتفاعل + الحذف المبكر)
+// ===================================
+// 2. الإعجاب بدعاء
+// (إعجابان كل ساعة، منع التكرار، نقاط، حذف مبكر)
+// ===================================
 exports.likeDua = async (req, res) => {
     try {
         const { duaId } = req.body;
-        const user = await getOrCreateDuaUser(req.user); // المستخدم المتفاعل
-        const dua = await Dua.findById(duaId);
+        if (!duaId || !mongoose.isValidObjectId(duaId)) {
+            return res.status(400).json({ success: false, message: 'معرف الدعاء غير صالح' });
+        }
 
+        const user = await getOrCreateDuaUser(req.user);
+        const dua = await Dua.findById(duaId);
         if (!dua) {
             return res.status(404).json({ success: false, message: 'الدعاء غير موجود' });
         }
 
-        // منع المستخدم من الإعجاب بدعائه الشخصي
         if (dua.userId.toString() === user._id.toString()) {
             return res.status(400).json({ success: false, message: 'لا يمكنك الإعجاب بدعائك الخاص' });
         }
 
-        // فحص حصة الإعجابات الساعية (إعجابين كل ساعة)
         const now = new Date();
-        const lastReset = user.lastLikeResetTime ? new Date(user.lastLikeResetTime) : now;
-        const hoursSinceReset = (now.getTime() - lastReset.getTime()) / (1000 * 60 * 60);
+        const hourAgo = new Date(now.getTime() - HOUR_MS);
 
-        if (hoursSinceReset >= 1) {
-            user.likesGivenThisHour = 0;
-            user.lastLikeResetTime = now;
-        }
+        // تصفير الحصة إذا مرت ساعة (أو لم تبدأ بعد)
+        await WheelUser.updateOne(
+            {
+                _id: user._id,
+                $or: [
+                    { lastLikeResetTime: null },
+                    { lastLikeResetTime: { $exists: false } },
+                    { lastLikeResetTime: { $lte: hourAgo } }
+                ]
+            },
+            { $set: { likesGivenThisHour: 0, lastLikeResetTime: now } }
+        );
 
-        if ((user.likesGivenThisHour || 0) >= 2) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'لقد استنفدت حصتك من الإعجابات (إعجابين كل ساعة). انتظر قليلاً.' 
+        // حجز إعجاب من الحصة بشكل ذري
+        const quota = await WheelUser.findOneAndUpdate(
+            {
+                _id: user._id,
+                $or: [
+                    { likesGivenThisHour: { $lt: MAX_LIKES_PER_HOUR } },
+                    { likesGivenThisHour: { $exists: false } }
+                ]
+            },
+            { $inc: { likesGivenThisHour: 1 } },
+            { new: true }
+        );
+
+        if (!quota) {
+            return res.status(400).json({
+                success: false,
+                message: `لقد استنفدت حصتك من الإعجابات (${MAX_LIKES_PER_HOUR} كل ساعة). انتظر قليلاً.`
             });
         }
 
-        // فحص الإعجاب السابق
-        if (dua.likedBy.includes(user._id)) {
+        // تسجيل الإعجاب بشكل ذري: يفشل إن كان المستخدم قد أعجب به سابقًا
+        const updatedDua = await Dua.findOneAndUpdate(
+            { _id: duaId, likedBy: { $ne: user._id } },
+            { $addToSet: { likedBy: user._id }, $inc: { likesCount: 1 } },
+            { new: true }
+        );
+
+        if (!updatedDua) {
+            // إعجاب مكرر أو دعاء حُذف للتو: نرجّع الحصة المحجوزة
+            await WheelUser.updateOne({ _id: user._id }, { $inc: { likesGivenThisHour: -1 } });
             return res.status(400).json({ success: false, message: 'لقد أعجبت بهذا الدعاء مسبقاً' });
         }
 
-        // 1. تحديث بيانات المتفاعل ومنحه 5 نقاط
-        user.likesGivenThisHour = (user.likesGivenThisHour || 0) + 1;
-        user.points = (user.points || 0) + 5; 
-        await user.save();
+        // نقاط المتفاعل
+        const liker = await WheelUser.findByIdAndUpdate(
+            user._id,
+            { $inc: { points: LIKER_POINTS } },
+            { new: true }
+        );
+        await logPoints(user.userId, LIKER_POINTS, 'dua_like', 'تفاعل وإعجاب بدعاء مبارك 🤲');
 
-        // 📝 تسجيل النقاط للمتفاعل في PointsHistory (مطابق تماماً للـ Schema)
-        await PointsHistory.create({
-            userId: user._id.toString(),
-            amount: 5,
-            source: 'dua_like',
-            description: 'تفاعل وإعجاب بدعاء مبارك 🤲'
-        });
-
-        // 2. تحديث إحصائيات الدعاء
-        dua.likedBy.push(user._id);
-        dua.likesCount += 1;
-        await dua.save();
-
-        // 3. تحديث بيانات الناشر ومنحه 10 نقاط
-        const duaAuthor = await WheelUser.findById(dua.userId);
-        if (duaAuthor) {
-            duaAuthor.totalLikesReceived = (duaAuthor.totalLikesReceived || 0) + 1;
-            duaAuthor.points = (duaAuthor.points || 0) + 10;
-            await duaAuthor.save();
-
-            // 📝 تسجيل النقاط للناشر في PointsHistory
-            await PointsHistory.create({
-                userId: duaAuthor._id.toString(),
-                amount: 10,
-                source: 'dua_like_received',
-                description: 'تلقي إعجاب على دعاء منتشر 🌟'
-            });
+        // نقاط الناشر
+        const author = await WheelUser.findByIdAndUpdate(
+            dua.userId,
+            { $inc: { totalLikesReceived: 1, points: AUTHOR_POINTS } },
+            { new: true }
+        );
+        if (author) {
+            await logPoints(author.userId, AUTHOR_POINTS, 'dua_like_received', 'تلقي إعجاب على دعاء منتشر 🌟');
         }
 
-        // شرط الحذف المبكر عند الوصول لـ 8 إعجابات
-        const TARGET_LIKES_FOR_EARLY_DELETE = 8;
+        // الحذف المبكر عند الوصول للحد
         let isDeletedEarly = false;
-
-        if (dua.likesCount >= TARGET_LIKES_FOR_EARLY_DELETE) {
-            await Dua.findByIdAndDelete(duaId);
+        if (updatedDua.likesCount >= TARGET_LIKES_FOR_EARLY_DELETE) {
+            await Dua.deleteOne({ _id: duaId });
             isDeletedEarly = true;
         }
 
-        res.status(200).json({ 
-            success: true, 
+        res.status(200).json({
+            success: true,
             message: 'تم تسجيل الإعجاب بنجاح وحصلت على 5 نقاط',
-            pointsEarned: 5,
-            currentLikes: dua.likesCount,
+            pointsEarned: LIKER_POINTS,
+            newPoints: liker ? liker.points : undefined,
+            currentLikes: updatedDua.likesCount,
             isDeletedEarly
         });
-
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('❌ LIKE DUA ERROR:', error);
+        res.status(500).json({ success: false, message: 'خطأ داخلي في السيرفر' });
     }
 };
 
-// 3. مسار جلب الأدعية النشطة
+// ===================================
+// 3. جلب الأدعية النشطة
+// ===================================
 exports.getDuasFeed = async (req, res) => {
     try {
         const duas = await Dua.find()
             .sort({ createdAt: -1 })
+            .limit(100)
             .select('-likedBy');
 
         res.status(200).json({ success: true, duas });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('❌ GET DUAS FEED ERROR:', error);
+        res.status(500).json({ success: false, message: 'خطأ في السيرفر' });
     }
 };
