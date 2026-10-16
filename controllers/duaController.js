@@ -6,6 +6,7 @@ const PointsHistory = require('../models/PointsHistory');
 
 const POST_COOLDOWN_HOURS = 6;
 const MAX_CONTENT_LENGTH = 500;
+const DUA_LIFETIME_HOURS = 6; // يجب أن تطابق مدة expires في models/Dua.js
 const MAX_LIKES_PER_HOUR = 2;
 const TARGET_LIKES_FOR_EARLY_DELETE = 8;
 const LIKER_POINTS = 5;
@@ -141,8 +142,9 @@ exports.likeDua = async (req, res) => {
 
         const user = await getOrCreateDuaUser(req.user);
         const dua = await Dua.findById(duaId);
-        if (!dua) {
-            return res.status(404).json({ success: false, message: 'الدعاء غير موجود' });
+        const expired = dua && Date.now() - new Date(dua.createdAt).getTime() > DUA_LIFETIME_HOURS * HOUR_MS;
+        if (!dua || expired) {
+            return res.status(404).json({ success: false, message: 'الدعاء غير موجود أو انتهت مدته' });
         }
 
         if (dua.userId.toString() === user._id.toString()) {
@@ -251,7 +253,12 @@ exports.getDuasFeed = async (req, res) => {
             myId = me ? me._id.toString() : null;
         }
 
-        const duas = await Dua.find().sort({ createdAt: -1 }).limit(100).lean();
+        // حذف TTL في MongoDB قد يتأخر حتى دقيقة، فنستبعد المنتهي هنا أيضًا ليختفي بدقة
+        const oldestAllowed = new Date(Date.now() - DUA_LIFETIME_HOURS * HOUR_MS);
+        const duas = await Dua.find({ createdAt: { $gt: oldestAllowed } })
+            .sort({ createdAt: -1 })
+            .limit(100)
+            .lean();
 
         // لا نرسل قائمة likedBy كاملة (خصوصية وحجم)، فقط likedByMe
         const result = duas.map(({ likedBy, ...rest }) => ({

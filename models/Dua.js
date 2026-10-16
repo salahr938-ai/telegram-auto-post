@@ -7,7 +7,12 @@ const duaSchema = new mongoose.Schema({
     category: { type: String, default: 'دعاء' },
     likesCount: { type: Number, default: 0 },
     likedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'WheelUser' }],
-    createdAt: { type: Date, default: Date.now }
+     // فهرس TTL: يحذف MongoDB الوثيقة تلقائيًا بعد المدة من وقت الإنشاء
+    createdAt: { type: Date, default: Date.now, expires: DUA_LIFETIME_SECONDS }
 });
 
 module.exports = mongoose.model('Dua', duaSchema);
+
+
+
+
