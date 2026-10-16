@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const admin = require('firebase-admin');
 const WheelUser = require('../models/WheelUser');
 const Dua = require('../models/Dua');
 const PointsHistory = require('../models/PointsHistory');
@@ -21,6 +22,19 @@ async function getOrCreateDuaUser(decodedToken) {
         });
     }
     return user;
+}
+
+// الاسم المستعار يُحفظ في Firestore (users/{uid}.name) ويُعدَّل من شاشة الملف الشخصي.
+// نقرأه من هناك وقت النشر. أي فشل يرجع null فيستعمل الكود الاسم البديل.
+async function getNickname(uid) {
+    try {
+        const snap = await admin.firestore().collection('users').doc(uid).get();
+        const name = snap.exists ? snap.get('name') : null;
+        return typeof name === 'string' && name.trim() ? name.trim() : null;
+    } catch (err) {
+        console.error('❌ getNickname error:', err.message);
+        return null;
+    }
 }
 
 // تسجيل النقاط في السجل. فشل التسجيل لا يلغي العملية.
@@ -75,9 +89,10 @@ exports.publishDua = async (req, res) => {
         }
 
         try {
+            const nickname = await getNickname(req.user.uid);
             await Dua.create({
                 userId: user._id,
-                authorName: user.name || 'مستخدم',
+                authorName: nickname || user.name || 'مستخدم',
                 content,
                 category: category || 'دعاء'
             });
