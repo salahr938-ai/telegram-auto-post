@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const admin = require('firebase-admin');
+const { getFirestore } = require('firebase-admin/firestore'); // نفس أسلوب تهيئة مشروعك (التطبيق الافتراضي)
 const WheelUser = require('../models/WheelUser');
 const Dua = require('../models/Dua');
 const PointsHistory = require('../models/PointsHistory');
@@ -28,8 +28,10 @@ async function getOrCreateDuaUser(decodedToken) {
 // نقرأه من هناك وقت النشر. أي فشل يرجع null فيستعمل الكود الاسم البديل.
 async function getNickname(uid) {
     try {
-        const snap = await admin.firestore().collection('users').doc(uid).get();
+        const snap = await getFirestore().collection('users').doc(uid).get();
         const name = snap.exists ? snap.get('name') : null;
+        // سجل تشخيصي مؤقت: يمكنك حذفه بعد التأكد
+        console.log('NICKNAME DEBUG:', uid, '| docExists:', snap.exists, '| name:', name);
         return typeof name === 'string' && name.trim() ? name.trim() : null;
     } catch (err) {
         console.error('❌ getNickname error:', err.message);
