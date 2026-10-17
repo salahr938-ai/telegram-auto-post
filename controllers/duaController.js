@@ -113,14 +113,14 @@ exports.publishDua = async (req, res) => {
                 content,
                 category: category || 'دعاء'
             });
-        } catch (createErr) {
+     } catch (createErr) {
+            // فشل الإنشاء: نعيد المهلة والعدّاد كما كانا
             await WheelUser.updateOne(
                 { _id: user._id },
-                { $set: { lastPostDate: reserved.lastPostDate \vert{}\vert{} null },$inc: { totalDuasPublished: -1 } }
+                { $set: { lastPostDate: reserved.lastPostDate || null }, $inc: { totalDuasPublished: -1 } }
             );
             throw createErr;
         }
-
         res.status(200).json({ success: true, message: 'تم نشر الدعاء بنجاح' });
     } catch (error) {
         console.error('❌ PUBLISH DUA ERROR:', error);
