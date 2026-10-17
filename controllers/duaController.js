@@ -1,19 +1,18 @@
 const mongoose = require('mongoose');
-const { getFirestore } = require('firebase-admin/firestore'); // نفس أسلوب تهيئة مشروعك (التطبيق الافتراضي)
+const { getFirestore } = require('firebase-admin/firestore');
 const WheelUser = require('../models/WheelUser');
 const Dua = require('../models/Dua');
 const PointsHistory = require('../models/PointsHistory');
 
 const POST_COOLDOWN_HOURS = 6;
 const MAX_CONTENT_LENGTH = 500;
-const DUA_LIFETIME_HOURS = 6; // يجب أن تطابق مدة expires في models/Dua.js
+const DUA_LIFETIME_HOURS = 6;
 const MAX_LIKES_PER_HOUR = 2;
 const TARGET_LIKES_FOR_EARLY_DELETE = 8;
 const LIKER_POINTS = 5;
 const AUTHOR_POINTS = 10;
 const HOUR_MS = 60 * 60 * 1000;
 
-// جلب أو إنشاء مستخدم من جدول WheelUser باستخدام الـ uid القادم من التوكن
 async function getOrCreateDuaUser(decodedToken) {
     let user = await WheelUser.findOne({ userId: decodedToken.uid });
     if (!user) {
@@ -25,13 +24,10 @@ async function getOrCreateDuaUser(decodedToken) {
     return user;
 }
 
-// الاسم المستعار يُحفظ في Firestore (users/{uid}.name) ويُعدَّل من شاشة الملف الشخصي.
-// نقرأه من هناك وقت النشر. أي فشل يرجع null فيستعمل الكود الاسم البديل.
 async function getNickname(uid) {
     try {
         const snap = await getFirestore().collection('users').doc(uid).get();
         const name = snap.exists ? snap.get('name') : null;
-        // سجل تشخيصي مؤقت: يمكنك حذفه بعد التأكد
         console.log('NICKNAME DEBUG:', uid, '| docExists:', snap.exists, '| name:', name);
         return typeof name === 'string' && name.trim() ? name.trim() : null;
     } catch (err) {
@@ -40,8 +36,6 @@ async function getNickname(uid) {
     }
 }
 
-// حالة حصة الإعجابات للمستخدم: كم بقي له، وبعد كم مللي ثانية تتجدد (إن استُنفدت).
-// نرسل المدة المتبقية (وليس وقتًا مطلقًا) حتى لا يتأثر العدّاد بضبط ساعة الهاتف.
 function computeLikeQuota(user) {
     const now = Date.now();
     const windowStart = user && user.lastLikeResetTime ? new Date(user.lastLikeResetTime).getTime() : 0;
@@ -54,8 +48,6 @@ function computeLikeQuota(user) {
     };
 }
 
-// تسجيل النقاط في السجل. فشل التسجيل لا يلغي العملية.
-// نستعمل Firebase uid (وليس _id) ليظهر في سجل الأرباح في التطبيق.
 async function logPoints(firebaseUid, amount, source, description) {
     try {
         await PointsHistory.create({ userId: firebaseUid, amount, source, description });
@@ -65,7 +57,7 @@ async function logPoints(firebaseUid, amount, source, description) {
 }
 
 // ===================================
-// 1. نشر دعاء جديد (مهلة 6 ساعات)
+// 1. نشر دعاء جديد
 // ===================================
 exports.publishDua = async (req, res) => {
     try {
@@ -83,16 +75,24 @@ exports.publishDua = async (req, res) => {
         }
 
         const user = await getOrCreateDuaUser(req.user);
+
+        // 🛑 التحقق من التوثيق
+        if (!user.isVerified) {
+            return res.status(403).json({
+                success: false,
+                message: 'حسابك غير موثق. يرجى التواصل معنا عبر واتساب أو تيليجرام لتوثيق الحساب.'
+            });
+        }
+
         const now = new Date();
         const cooldownLimit = new Date(now.getTime() - POST_COOLDOWN_HOURS * HOUR_MS);
 
-        // حجز الدور بشكل ذري: يمنع نشر دعاءين بطلبين متزامنين
         const reserved = await WheelUser.findOneAndUpdate(
             {
                 _id: user._id,
-                $or: [{ lastPostDate: null }, { lastPostDate: { $exists: false } }, { lastPostDate: { $lte: cooldownLimit } }]
+                $or: [{ lastPostDate: null }, { lastPostDate: { $exists: false } }, { lastPostDate: {$lte: cooldownLimit } }]
             },
-            { $set: { lastPostDate: now }, $inc: { totalDuasPublished: 1 } },
+            { $set: { lastPostDate: now },$inc: { totalDuasPublished: 1 } },
             { new: false }
         );
 
@@ -114,10 +114,9 @@ exports.publishDua = async (req, res) => {
                 category: category || 'دعاء'
             });
         } catch (createErr) {
-            // فشل الإنشاء: نعيد المهلة والعدّاد كما كانا
             await WheelUser.updateOne(
                 { _id: user._id },
-                { $set: { lastPostDate: reserved.lastPostDate || null }, $inc: { totalDuasPublished: -1 } }
+                { $set: { lastPostDate: reserved.lastPostDate \vert{}\vert{} null },$inc: { totalDuasPublished: -1 } }
             );
             throw createErr;
         }
@@ -131,7 +130,6 @@ exports.publishDua = async (req, res) => {
 
 // ===================================
 // 2. الإعجاب بدعاء
-// (إعجابان كل ساعة، منع التكرار، نقاط، حذف مبكر)
 // ===================================
 exports.likeDua = async (req, res) => {
     try {
@@ -141,6 +139,15 @@ exports.likeDua = async (req, res) => {
         }
 
         const user = await getOrCreateDuaUser(req.user);
+
+        // 🛑 التحقق من التوثيق
+        if (!user.isVerified) {
+            return res.status(403).json({
+                success: false,
+                message: 'حسابك غير موثق. يرجى التواصل معنا عبر واتساب أو تيليجرام لتوثيق الحساب.'
+            });
+        }
+
         const dua = await Dua.findById(duaId);
         const expired = dua && Date.now() - new Date(dua.createdAt).getTime() > DUA_LIFETIME_HOURS * HOUR_MS;
         if (!dua || expired) {
@@ -154,7 +161,6 @@ exports.likeDua = async (req, res) => {
         const now = new Date();
         const hourAgo = new Date(now.getTime() - HOUR_MS);
 
-        // تصفير الحصة إذا مرت ساعة (أو لم تبدأ بعد)
         await WheelUser.updateOne(
             {
                 _id: user._id,
@@ -167,7 +173,6 @@ exports.likeDua = async (req, res) => {
             { $set: { likesGivenThisHour: 0, lastLikeResetTime: now } }
         );
 
-        // حجز إعجاب من الحصة بشكل ذري
         const quota = await WheelUser.findOneAndUpdate(
             {
                 _id: user._id,
@@ -187,20 +192,17 @@ exports.likeDua = async (req, res) => {
             });
         }
 
-        // تسجيل الإعجاب بشكل ذري: يفشل إن كان المستخدم قد أعجب به سابقًا
         const updatedDua = await Dua.findOneAndUpdate(
             { _id: duaId, likedBy: { $ne: user._id } },
-            { $addToSet: { likedBy: user._id }, $inc: { likesCount: 1 } },
+            { $addToSet: { likedBy: user._id },$inc: { likesCount: 1 } },
             { new: true }
         );
 
         if (!updatedDua) {
-            // إعجاب مكرر أو دعاء حُذف للتو: نرجّع الحصة المحجوزة
             await WheelUser.updateOne({ _id: user._id }, { $inc: { likesGivenThisHour: -1 } });
             return res.status(400).json({ success: false, message: 'لقد أعجبت بهذا الدعاء مسبقاً' });
         }
 
-        // نقاط المتفاعل
         const liker = await WheelUser.findByIdAndUpdate(
             user._id,
             { $inc: { points: LIKER_POINTS } },
@@ -208,7 +210,6 @@ exports.likeDua = async (req, res) => {
         );
         await logPoints(user.userId, LIKER_POINTS, 'dua_like', 'تفاعل وإعجاب بدعاء مبارك 🤲');
 
-        // نقاط الناشر
         const author = await WheelUser.findByIdAndUpdate(
             dua.userId,
             { $inc: { totalLikesReceived: 1, points: AUTHOR_POINTS } },
@@ -218,7 +219,6 @@ exports.likeDua = async (req, res) => {
             await logPoints(author.userId, AUTHOR_POINTS, 'dua_like_received', 'تلقي إعجاب على دعاء منتشر 🌟');
         }
 
-        // الحذف المبكر عند الوصول للحد
         let isDeletedEarly = false;
         if (updatedDua.likesCount >= TARGET_LIKES_FOR_EARLY_DELETE) {
             await Dua.deleteOne({ _id: duaId });
@@ -244,29 +244,31 @@ exports.likeDua = async (req, res) => {
 // ===================================
 exports.getDuasFeed = async (req, res) => {
     try {
-        // معرّف المستخدم الحالي ليُحسب لكل دعاء هل أعجب به (likedByMe)
         let myId = null;
         let me = null;
         if (req.user && req.user.uid) {
             me = await WheelUser.findOne({ userId: req.user.uid })
-                .select('_id likesGivenThisHour lastLikeResetTime');
+                .select('_id likesGivenThisHour lastLikeResetTime isVerified');
             myId = me ? me._id.toString() : null;
         }
 
-        // حذف TTL في MongoDB قد يتأخر حتى دقيقة، فنستبعد المنتهي هنا أيضًا ليختفي بدقة
         const oldestAllowed = new Date(Date.now() - DUA_LIFETIME_HOURS * HOUR_MS);
         const duas = await Dua.find({ createdAt: { $gt: oldestAllowed } })
             .sort({ createdAt: -1 })
             .limit(100)
             .lean();
 
-        // لا نرسل قائمة likedBy كاملة (خصوصية وحجم)، فقط likedByMe
         const result = duas.map(({ likedBy, ...rest }) => ({
             ...rest,
             likedByMe: myId ? (likedBy || []).some((id) => id.toString() === myId) : false
         }));
 
-        res.status(200).json({ success: true, duas: result, ...computeLikeQuota(me) });
+        res.status(200).json({
+            success: true,
+            duas: result,
+            isVerified: me ? (me.isVerified || false) : false,
+            ...computeLikeQuota(me)
+        });
     } catch (error) {
         console.error('❌ GET DUAS FEED ERROR:', error);
         res.status(500).json({ success: false, message: 'خطأ في السيرفر' });

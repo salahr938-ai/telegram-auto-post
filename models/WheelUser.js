@@ -7,7 +7,11 @@ const wheelSchema = new mongoose.Schema({
   referredBy: { type: String, default: "" },             // الشخص لي دعاه
   points: { type: Number, default: 0 },
   referralStatus: { type: String, default: "none" },     // الحالة الافتراضية الصحيحة "none"
-  
+  // 🛡️ حقل التوثيق الجديد الخاص بتطبيق راجي
+  isVerified: { 
+    type: Boolean, 
+    default: false // يبدأ غير موثق تلقائياً عند التسجيل
+  },
   // حقول عجلة الحظ والمؤقتات الجديدة
   spinsLeft: { type: Number, default: 1 },               // بدأناها بـ 1 افتراضياً
   lastSpinTime: { type: Date, default: null },           // لتخزين وقت آخر لفة مجانية
