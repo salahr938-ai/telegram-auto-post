@@ -126,7 +126,7 @@ exports.openBox = async (req, res) => {
             {
                 $set: {
                     boxAvailable: false,
-                    boxNextOpen: new Date(0)
+                    boxNextOpen: new Date(Date.now() + 3 * 60 * 60 * 1000) // 👈 يبدأ عداد الـ 3 ساعات فور فتح الصندوق
                 }
             },
             {
