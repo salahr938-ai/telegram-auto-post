@@ -184,6 +184,7 @@ exports.openBox = async (req, res) => {
 };
 
 // 3. مشاهدة الإعلان وتفعيل عداد الـ 3 ساعات
+// 3. مشاهدة الإعلان وتفعيل عداد الـ 3 ساعات (مع حد أقصى 3 إعلانات يومياً + فاصل زمني 5 دقائق)
 exports.watchAd = async (req, res) => {
     try {
         const { userId } = req.body;
@@ -196,28 +197,58 @@ exports.watchAd = async (req, res) => {
             });
         }
 
-        const now = Date.now();
+        const now = new Date();
 
-        // 🛡️ حماية: إذا كان العداد يعمل بالفعل
-        if (
-            user.boxNextOpen &&
-            user.boxNextOpen.getTime() > now
-        ) {
-            return res.json({
+        // 🛡️ 1. التحقق من إعادة تعيين عداد الإعلانات اليومي (إذا مر يوم جديد)
+        const lastWatch = user.boxAdsLastWatchedDate ? new Date(user.boxAdsLastWatchedDate) : null;
+        const isNewDay = !lastWatch || 
+            now.getDate() !== lastWatch.getDate() || 
+            now.getMonth() !== lastWatch.getMonth() || 
+            now.getFullYear() !== lastWatch.getFullYear();
+
+        if (isNewDay) {
+            user.boxAdsWatchedToday = 0;
+            user.boxAdsLastWatchedDate = null; // إعادة تعيين وقت آخر إعلان لليوم الجديد
+        }
+
+        // 🛡️ 2. التحقق من تجاوز الحد الأقصى (3 إعلانات يومياً)
+        if (user.boxAdsWatchedToday >= 3) {
+            return res.status(400).json({
                 success: false,
-                alreadyRunning: true,
-                message: "العداد يعمل بالفعل، لا يمكن إعادة تعيينه!",
-                nextOpen: user.boxNextOpen
+                message: "لقد استنفدت الحد الأقصى لمشاهدة إعلانات الصندوق اليومية (3 إعلانات)."
             });
         }
 
-        user.boxAvailable = false;
-        user.boxNextOpen = new Date(now + 3 * 60 * 60 * 1000);
+        // 🛡️ 3. التحقق من الفاصل الزمني بين الإعلانات (5 دقائق)
+        if (user.boxAdsLastWatchedAt) {
+            const timeSinceLastAd = now.getTime() - new Date(user.boxAdsLastWatchedAt).getTime();
+            const cooldownTime = 5 * 60 * 1000; // 5 دقائق بالمللي ثانية
+
+            if (timeSinceLastAd < cooldownTime) {
+                const remainingMinutes = Math.ceil((cooldownTime - timeSinceLastAd) / (60 * 1000));
+                return res.status(400).json({
+                    success: false,
+                    message: `يرجى الانتظار ${remainingMinutes} دقائق قبل مشاهدة إعلان آخر.`
+                });
+            }
+        }
+
+        // 📝 تحديث البيانات بعد مشاهدة الإعلان بنجاح
+        user.boxAdsWatchedToday = (user.boxAdsWatchedToday || 0) + 1;
+        user.boxAdsLastWatchedAt = now;
+        user.boxAdsLastWatchedDate = now;
+
+        // 🎁 تفعيل الصندوق وبدء مؤقت الـ 3 ساعات الجديدة لتخطي الانتظار
+        user.boxAvailable = true; 
+        user.boxNextOpen = new Date(now.getTime() + 3 * 60 * 60 * 1000); 
 
         await user.save();
 
         res.json({
             success: true,
+            message: "تم تخطي الانتظار وتفعيل الصندوق بنجاح!",
+            boxAdsWatchedToday: user.boxAdsWatchedToday,
+            remainingAds: 3 - user.boxAdsWatchedToday,
             nextOpen: user.boxNextOpen
         });
 

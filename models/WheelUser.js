@@ -26,12 +26,14 @@ const wheelSchema = new mongoose.Schema({
   lastPrize: { type: String, default: "0" },
   resetTime: { type: Date, default: () => new Date(Date.now() + 24 * 60 * 60 * 1000) },
   lastScratchAt: { type: Date, default: new Date(0) },
-
-  // 📦 صندوق المفاجآت
-  boxAvailable: { type: Boolean, default: true },        // أول مرة متاح مجانا
+boxAvailable: { type: Boolean, default: true },        // أول مرة متاح مجانا
   boxNextOpen: { type: Date, default: new Date(0) },     // موعد الفتح القادم
   boxOpenedCount: { type: Number, default: 0 },          // عدد مرات الفتح
-
+  
+  // 🛡️ الحقول الجديدة الخاصة بحماية إعلانات الصندوق (الحد اليومي + الكولداون)
+  boxAdsWatchedToday: { type: Number, default: 0 },      // عدد الإعلانات المشاهدة اليوم
+  boxAdsLastWatchedDate: { type: Date, default: null },  // تاريخ آخر إعلان لمراقبة التصفير اليومي
+  boxAdsLastWatchedAt: { type: Date, default: null },
   // 🧩 خريطة مستويات لعبة المطابقة (Match-3)
   unlockedLevel: { type: Number, default: 1 },           // أعلى مستوى متاح للمستخدم
   levelCooldowns: { type: Map, of: Date, default: {} },
