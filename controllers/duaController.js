@@ -242,6 +242,9 @@ exports.likeDua = async (req, res) => {
 // ===================================
 // 3. جلب الأدعية النشطة
 // ===================================
+// ===================================
+// 3. جلب الأدعية النشطة (مع إجمالي إعجابات الكاتب الحقيقية)
+// ===================================
 exports.getDuasFeed = async (req, res) => {
     try {
         let myId = null;
@@ -253,13 +256,18 @@ exports.getDuasFeed = async (req, res) => {
         }
 
         const oldestAllowed = new Date(Date.now() - DUA_LIFETIME_HOURS * HOUR_MS);
+        
+        // 🌟 1. استخدام populate لجلب بيانات صاحب الدعاء (بما فيها totalLikesReceived)
         const duas = await Dua.find({ createdAt: { $gt: oldestAllowed } })
+            .populate('userId', 'totalLikesReceived name')
             .sort({ createdAt: -1 })
             .limit(100)
             .lean();
 
-        const result = duas.map(({ likedBy, ...rest }) => ({
+        // 🌟 2. دمج إجمالي إعجابات الكاتب مع بيانات المنشور المرسلة للأندرويد
+        const result = duas.map(({ likedBy, userId: author, ...rest }) => ({
             ...rest,
+            authorTotalLikes: author ? (author.totalLikesReceived || 0) : 0, // 👈 إرسال إجمالي الإعجابات الحقيقي للكاتب
             likedByMe: myId ? (likedBy || []).some((id) => id.toString() === myId) : false
         }));
 
