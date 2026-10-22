@@ -44,6 +44,11 @@ boxAvailable: { type: Boolean, default: true },        // أول مرة متاح
   lastPostDate: { type: Date, default: null },
   likesGivenThisHour: { type: Number, default: 0 },
   lastLikeResetTime: { type: Date, default: Date.now },
+    // 🎁 إعجابات إضافية من الإعلانات
+  bonusLikes: { type: Number, default: 0 },
+  bonusAdsToday: { type: Number, default: 0 },
+  bonusAdsDate: { type: String, default: "" },
+    bonusAdLastAt: { type: Date, default: null },
 
   // 🛡️ حقول حماية إعلانات العجلة المؤقتة
   pendingAdToken: { type: String, default: null },

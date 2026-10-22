@@ -12,6 +12,15 @@ const TARGET_LIKES_FOR_EARLY_DELETE = 8;
 const LIKER_POINTS = 5;
 const AUTHOR_POINTS = 10;
 const HOUR_MS = 60 * 60 * 1000;
+// 🎁 إعجابات إضافية مقابل مشاهدة إعلان
+const BONUS_LIKES_PER_AD = 2;
+const MAX_BONUS_ADS_PER_DAY = 3;
+const BONUS_AD_COOLDOWN_MS = 5 * 60 * 1000; // 5 دقايق بين إعلان وإعلان
+
+
+function todayKey() {
+    return new Date().toISOString().slice(0, 10);
+}
 
 async function getOrCreateDuaUser(decodedToken) {
     let user = await WheelUser.findOne({ userId: decodedToken.uid });
@@ -41,12 +50,25 @@ function computeLikeQuota(user) {
     const windowStart = user && user.lastLikeResetTime ? new Date(user.lastLikeResetTime).getTime() : 0;
     const windowActive = windowStart > 0 && now - windowStart < HOUR_MS;
     const used = windowActive ? (user.likesGivenThisHour || 0) : 0;
-    const remaining = Math.max(0, MAX_LIKES_PER_HOUR - used);
+    const regularRemaining = Math.max(0, MAX_LIKES_PER_HOUR - used);
+    const bonus = user && user.bonusLikes > 0 ? user.bonusLikes : 0;
+    const total = regularRemaining + bonus;
     return {
-        likesRemaining: remaining,
-        likesResetInMs: windowActive && remaining === 0 ? windowStart + HOUR_MS - now : 0
+        likesRemaining: total,
+        bonusLikes: bonus,
+        likesResetInMs: windowActive && total === 0 ? windowStart + HOUR_MS - now : 0
     };
 }
+
+function computeBonusAdsRemaining(user) {
+    const used = user && user.bonusAdsDate === todayKey() ? (user.bonusAdsToday || 0) : 0;
+    return Math.max(0, MAX_BONUS_ADS_PER_DAY - used);
+}
+function computeBonusAdCooldownMs(user) {
+    if (!user || !user.bonusAdLastAt) return 0;
+    return Math.max(0, new Date(user.bonusAdLastAt).getTime() + BONUS_AD_COOLDOWN_MS - Date.now());
+}
+
 
 async function logPoints(firebaseUid, amount, source, description) {
     try {
@@ -173,6 +195,7 @@ exports.likeDua = async (req, res) => {
             { $set: { likesGivenThisHour: 0, lastLikeResetTime: now } }
         );
 
+               let usedBonus = false;
         const quota = await WheelUser.findOneAndUpdate(
             {
                 _id: user._id,
@@ -186,10 +209,18 @@ exports.likeDua = async (req, res) => {
         );
 
         if (!quota) {
-            return res.status(400).json({
-                success: false,
-                message: `لقد استنفدت حصتك من الإعجابات (${MAX_LIKES_PER_HOUR} كل ساعة). انتظر قليلاً.`
-            });
+            const bonusQuota = await WheelUser.findOneAndUpdate(
+                { _id: user._id, bonusLikes: { $gt: 0 } },
+                { $inc: { bonusLikes: -1 } },
+                { new: true }
+            );
+            if (!bonusQuota) {
+                return res.status(400).json({
+                    success: false,
+                    message: `لقد استنفدت حصتك من الإعجابات (${MAX_LIKES_PER_HOUR} كل ساعة). انتظر قليلاً أو شاهد إعلانًا للحصول على المزيد.`
+                });
+            }
+            usedBonus = true;
         }
 
         const updatedDua = await Dua.findOneAndUpdate(
@@ -199,7 +230,10 @@ exports.likeDua = async (req, res) => {
         );
 
         if (!updatedDua) {
-            await WheelUser.updateOne({ _id: user._id }, { $inc: { likesGivenThisHour: -1 } });
+                      await WheelUser.updateOne(
+                { _id: user._id },
+                usedBonus ? { $inc: { bonusLikes: 1 } } : { $inc: { likesGivenThisHour: -1 } }
+            );
             return res.status(400).json({ success: false, message: 'لقد أعجبت بهذا الدعاء مسبقاً' });
         }
 
@@ -251,7 +285,7 @@ exports.getDuasFeed = async (req, res) => {
         let me = null;
         if (req.user && req.user.uid) {
             me = await WheelUser.findOne({ userId: req.user.uid })
-                .select('_id likesGivenThisHour lastLikeResetTime isVerified');
+                               .select('_id likesGivenThisHour lastLikeResetTime isVerified bonusLikes bonusAdsToday bonusAdsDate bonusAdLastAt');
             myId = me ? me._id.toString() : null;
         }
 
@@ -274,11 +308,83 @@ exports.getDuasFeed = async (req, res) => {
         res.status(200).json({
             success: true,
             duas: result,
-            isVerified: me ? (me.isVerified || false) : false,
+                       isVerified: me ? (me.isVerified || false) : false,
+            bonusAdsRemaining: computeBonusAdsRemaining(me),
+            bonusAdCooldownMs: computeBonusAdCooldownMs(me),
+            bonusLikesPerAd: BONUS_LIKES_PER_AD,
             ...computeLikeQuota(me)
         });
     } catch (error) {
         console.error('❌ GET DUAS FEED ERROR:', error);
         res.status(500).json({ success: false, message: 'خطأ في السيرفر' });
+    }
+};
+
+// ===================================
+// 4. استلام الإعجابات الإضافية بعد مشاهدة إعلان
+// ===================================
+exports.claimBonusLikes = async (req, res) => {
+    try {
+        const user = await getOrCreateDuaUser(req.user);
+
+        if (!user.isVerified) {
+            return res.status(403).json({
+                success: false,
+                message: 'حسابك غير موثق. يرجى التواصل معنا عبر واتساب أو تيليجرام لتوثيق الحساب.'
+            });
+        }
+
+        const now = new Date();
+        const today = todayKey();
+        const cooldownLimit = new Date(now.getTime() - BONUS_AD_COOLDOWN_MS);
+
+        await WheelUser.updateOne(
+            { _id: user._id, bonusAdsDate: { $ne: today } },
+            { $set: { bonusAdsToday: 0, bonusAdsDate: today } }
+        );
+
+        // يشترط: ما وصلش الحد اليومي + عدّت 5 دقايق على آخر إعلان
+        const updated = await WheelUser.findOneAndUpdate(
+            {
+                _id: user._id,
+                $and: [
+                    { $or: [{ bonusAdsToday: { $lt: MAX_BONUS_ADS_PER_DAY } }, { bonusAdsToday: { $exists: false } }] },
+                    { $or: [{ bonusAdLastAt: null }, { bonusAdLastAt: { $exists: false } }, { bonusAdLastAt: { $lte: cooldownLimit } }] }
+                ]
+            },
+            {
+                $inc: { bonusAdsToday: 1, bonusLikes: BONUS_LIKES_PER_AD },
+                $set: { bonusAdLastAt: now }
+            },
+            { new: true }
+        );
+
+        if (!updated) {
+            // نعرف السبب: الحد اليومي ولا الانتظار
+            const fresh = await WheelUser.findById(user._id).select('bonusAdsToday bonusAdLastAt');
+            const usedToday = fresh ? (fresh.bonusAdsToday || 0) : 0;
+            if (usedToday >= MAX_BONUS_ADS_PER_DAY) {
+                return res.status(400).json({
+                    success: false,
+                    message: `وصلت للحد اليومي (${MAX_BONUS_ADS_PER_DAY} إعلانات). جرّب غدًا.`
+                });
+            }
+            const waitMin = Math.max(1, Math.ceil(computeBonusAdCooldownMs(fresh) / 60000));
+            return res.status(400).json({
+                success: false,
+                message: `انتظر ${waitMin} دقيقة قبل مشاهدة الإعلان التالي.`
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: `تمت إضافة ${BONUS_LIKES_PER_AD} إعجابات 🎁`,
+            bonusLikes: updated.bonusLikes,
+            bonusAdsRemaining: Math.max(0, MAX_BONUS_ADS_PER_DAY - (updated.bonusAdsToday || 0)),
+            bonusAdCooldownMs: BONUS_AD_COOLDOWN_MS
+        });
+    } catch (error) {
+        console.error('❌ CLAIM BONUS ERROR:', error);
+        res.status(500).json({ success: false, message: 'خطأ داخلي في السيرفر' });
     }
 };

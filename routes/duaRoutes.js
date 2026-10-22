@@ -6,6 +6,8 @@ const verifyFirebaseToken = require('../middlewares/authMiddleware'); // است�
 // 1. مسار نشر دعاء جديد (يتطلب توكن صحيح ومرتبط بإعلان المكافأة في الواجهة)
 router.post('/publish', verifyFirebaseToken, duaController.publishDua);
 
+// 4. مسار استلام الإعجابات الإضافية بعد مشاهدة إعلان
+router.post('/bonus-likes', verifyFirebaseToken, duaController.claimBonusLikes);
 // 2. مسار الإعجاب بدعاء (مع التحقق من حصة الإعجابات الساعية ونقاط المتفاعل)
 router.post('/like', verifyFirebaseToken, duaController.likeDua);
 
