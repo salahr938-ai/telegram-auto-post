@@ -23,6 +23,7 @@ const surpriseBoxRoutes = require("./routes/surpriseBoxRoutes");
 const match3Routes = require("./routes/match3Routes");
 const waterSortRoutes = require("./routes/waterSortRoutes");
 const duaRoutes = require("./routes/duaRoutes");
+const suggestionRoutes = require("./routes/suggestionRoutes");
 // ==========================================
 // 2. إعدادات التطبيق (App Setup)
 // ==========================================
@@ -59,6 +60,7 @@ app.use("/api/points", pointsRoutes);
 app.use('/api/scratch', scratchRoutes);
 app.use("/api/surprise-box", surpriseBoxRoutes);
 app.use("/api/match3", match3Routes);
+app.use("/api/suggestions", suggestionRoutes);
 // ==========================================
 // 4. الاتصال بقاعدة البيانات والتشغيل
 // ==========================================
