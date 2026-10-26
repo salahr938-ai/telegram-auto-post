@@ -1,6 +1,6 @@
 const Suggestion = require('../models/suggestionModel');
 const User = require('../models/userModel'); // افترض أن لديك نموذج المستخدمين لحفظ النقاط
-
+const PointsHistory = require("../models/PointsHistory");
 // مدة الانتظار: 3 أيام بالمللي ثانية (72 ساعة)
 const COOLDOWN_PERIOD = 3 * 24 * 60 * 60 * 1000;
 
@@ -42,7 +42,14 @@ exports.createSuggestion = async (req, res) => {
             { $inc: { points: BASE_POINTS } },
             { new: true }
         );
-
+// 📝 تسجيل العملية في السجل
+await PointHistory.create({
+    userId: userId,
+    amount: BASE_POINTS,
+    source: 'suggestion',
+    description: 'مكافأة إرسال اقتراح تحسين للتطبيق',
+    createdAt: new Date()
+});
         res.status(201).json({
             success: true,
             message: 'تم إرسال اقتراحك بنجاح وحصلت على 20 نقطة!',
@@ -67,6 +74,14 @@ exports.claimAdBonus = async (req, res) => {
             { $inc: { points: BONUS_POINTS } },
             { new: true }
         );
+        // 📝 تسجيل العملية في السجل
+await PointHistory.create({
+    userId: userId,
+    amount: BONUS_POINTS,
+    source: 'suggestion_ad',
+    description: 'مكافأة مشاهدة إعلان الاقتراح',
+    createdAt: new Date()
+});
 
         res.status(200).json({
             success: true,
