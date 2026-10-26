@@ -93,3 +93,19 @@ await PointsHistory.create({
         res.status(500).json({ success: false, message: 'خطأ في الخادم.' });
     }
 };
+
+exports.getMySuggestions = async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        // جلب اقتراحات المستخدم مرتبة من الأحدث إلى الأقدم
+        const suggestions = await Suggestion.find({ userId }).sort({ createdAt: -1 });
+        
+        res.status(200).json({
+            success: true,
+            suggestions
+        });
+    } catch (error) {
+        console.error('Error in getMySuggestions:', error);
+        res.status(500).json({ success: false, message: 'خطأ في الخادم.' });
+    }
+};
