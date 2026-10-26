@@ -43,7 +43,7 @@ exports.createSuggestion = async (req, res) => {
             { new: true }
         );
 // 📝 تسجيل العملية في السجل
-await PointHistory.create({
+await PointsHistory.create({
     userId: userId,
     amount: BASE_POINTS,
     source: 'suggestion',
@@ -75,7 +75,7 @@ exports.claimAdBonus = async (req, res) => {
             { new: true }
         );
         // 📝 تسجيل العملية في السجل
-await PointHistory.create({
+await PointsHistory.create({
     userId: userId,
     amount: BONUS_POINTS,
     source: 'suggestion_ad',
