@@ -5,5 +5,6 @@ const verifyFirebaseToken = require("../middlewares/authMiddleware"); // بـ s 
 
 // مسار إرسال اقتراح جديد (محمي بـ Auth)
 router.post('/', verifyFirebaseToken, suggestionController.createSuggestion);
+router.post('/claim-bonus', verifyFirebaseToken, suggestionController.claimAdBonus);
 
 module.exports = router;

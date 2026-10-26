@@ -6,61 +6,75 @@ const COOLDOWN_PERIOD = 3 * 24 * 60 * 60 * 1000;
 
 exports.createSuggestion = async (req, res) => {
     try {
-        // الـ userId يأتي من مmiddleware التحقق من توكن Firebase
         const userId = req.user.uid; 
         const { content } = req.body;
 
         if (!content || content.trim() === '') {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'محتوى الاقتراح لا يمكن أن يكون فارغاً.' 
-            });
+            return res.status(400).json({ success: false, message: 'محتوى الاقتراح فارغ.' });
         }
 
-        // 1️⃣ التحقق من آخر اقتراح أرسله هذا المستخدم
+        // التحقق من مدة الانتظار (Cooldown 3 أيام)
         const lastSuggestion = await Suggestion.findOne({ userId }).sort({ createdAt: -1 });
-
         if (lastSuggestion) {
             const elapsed = Date.now() - new Date(lastSuggestion.createdAt).getTime();
-            
+            const COOLDOWN_PERIOD = 3 * 24 * 60 * 60 * 1000;
             if (elapsed < COOLDOWN_PERIOD) {
-                const remainingMs = COOLDOWN_PERIOD - elapsed;
-                const remainingHours = Math.ceil(remainingMs / (1000 * 60 * 60));
-                
-                return res.status(400).json({
-                    success: false,
-                    message: `عليك الانتظار لمدة ${remainingHours} ساعة أخرى لتقديم اقتراح جديد.`
+                const remainingHours = Math.ceil((COOLDOWN_PERIOD - elapsed) / (1000 * 60 * 60));
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `عليك الانتظار لمدة ${remainingHours} ساعة أخرى لتقديم اقتراح جديد.` 
                 });
             }
         }
 
-        // 2️⃣ حفظ الاقتراح الجديد في قاعدة البيانات
+        // حفظ الاقتراح بحالة pending
         const newSuggestion = await Suggestion.create({
             userId,
             userName: req.user.name || 'مستخدم',
-            content
+            content,
+            status: 'pending'
         });
 
-        // 3️⃣ إضافة النقاط للمستخدم (مثلاً 40 نقطة أساسية)
-        const REWARD_POINTS = 40;
+        // 🎁 منح الـ 20 نقطة الأساسية فوراً
+        const BASE_POINTS = 20;
         await User.findOneAndUpdate(
-            { firebaseUid: userId }, // أو المعرّف حسب تصميم جدول المستخدمين لديك (_id أو firebaseUid)
-            { $inc: { points: REWARD_POINTS } },
+            { userId: userId },
+            { $inc: { points: BASE_POINTS } },
             { new: true }
         );
 
         res.status(201).json({
             success: true,
-            message: 'تم إرسال اقتراحك بنجاح وحصلت على نقاط المكافأة!',
-            earnedPoints: REWARD_POINTS,
-            suggestion: newSuggestion
+            message: 'تم إرسال اقتراحك بنجاح وحصلت على 20 نقطة!',
+            suggestionId: newSuggestion._id,
+            earnedPoints: BASE_POINTS
         });
 
     } catch (error) {
         console.error('Error in createSuggestion:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'حدث خطأ في الخادم، يجدر المحاولة لاحقاً.' 
+        res.status(500).json({ success: false, message: 'خطأ في الخادم.' });
+    }
+};
+
+exports.claimAdBonus = async (req, res) => {
+    try {
+        const userId = req.user.uid;
+
+        // 🎁 إضافة الـ 60 نقطة الإضافية بعد مشاهدة الإعلان
+        const BONUS_POINTS = 60; 
+        await User.findOneAndUpdate(
+            { userId: userId },
+            { $inc: { points: BONUS_POINTS } },
+            { new: true }
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'مبروك! شاهدت الإعلان وحصلت على 60 نقطة إضافية.'
         });
+
+    } catch (error) {
+        console.error('Error in claimAdBonus:', error);
+        res.status(500).json({ success: false, message: 'خطأ في الخادم.' });
     }
 };
