@@ -18,7 +18,7 @@ const SPIN_COOLDOWN_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const AD_TOKEN_TTL_MS = 5 * 60 * 1000;
 const RESET_POINTS_ON_ENTRY = true; // true = يُخصم 500 نقطة عند دخول السحب
-
+const AD_COOLDOWN_MS = 5 * 60 * 1000;
 const PRIZES = [10, 20, 30, 40, 50, 60];
 const WEIGHTS = [10, 20, 30, 25, 10, 5];
 
@@ -112,9 +112,16 @@ exports.requestAdSession = async (req, res) => {
     await ensureAccount(userId);
     await resetAdsIfNeeded(userId, now);
 
-    const adToken = crypto.randomBytes(16).toString("hex");
+       const adToken = crypto.randomBytes(16).toString("hex");
     const account = await WheelUser.findOneAndUpdate(
-      { userId, adsWatchedToday: { $lt: MAX_ADS_PER_DAY } },
+      {
+        userId,
+        adsWatchedToday: { $lt: MAX_ADS_PER_DAY },
+        $or: [
+          { lastAdAt: null },
+          { lastAdAt: { $lte: new Date(now.getTime() - AD_COOLDOWN_MS) } },
+        ],
+      },
       {
         $set: {
           pendingAdToken: adToken,
@@ -124,7 +131,19 @@ exports.requestAdSession = async (req, res) => {
       },
       { new: true }
     );
-    if (!account) return res.status(400).send("⚠️ لقد استنفذت الحد الأقصى لإعلانات اليوم");
+    if (!account) {
+      const u = await WheelUser.findOne({ userId }).select("adsWatchedToday lastAdAt");
+      if (u && u.adsWatchedToday >= MAX_ADS_PER_DAY) {
+        return res.status(400).send("⚠️ لقد استنفذت الحد الأقصى لإعلانات اليوم");
+      }
+      const waitMs = u?.lastAdAt ? AD_COOLDOWN_MS - (now - u.lastAdAt) : AD_COOLDOWN_MS;
+      return res.status(429).json({
+        success: false,
+        message: "⏳ انتظر قبل الإعلان التالي",
+        retryAfterMs: Math.max(waitMs, 0),
+      });
+    }
+
 
     res.json({ success: true, adToken, adsWatchedToday: account.adsWatchedToday });
   } catch (err) {
@@ -132,6 +151,8 @@ exports.requestAdSession = async (req, res) => {
     res.status(500).send("❌ خطأ في السيرفر");
   }
 };
+
+
 
 // 2) AdMob Server-Side Verification: جوجل هي التي تستدعي هذا المسار
 let keyCache = { at: 0, keys: {} };
@@ -224,6 +245,10 @@ exports.getWheelStatus = async (req, res) => {
       spinsLeft: account.nextSpinTime <= now ? 1 : 0,
       lastPrize: account.lastPrize || "0",
       adsWatchedToday: account.adsWatchedToday || 0,
+      adCooldownMs: account.lastAdAt
+        ? Math.max(AD_COOLDOWN_MS - (now - account.lastAdAt), 0)
+        : 0,
+
       nextSpinTime: account.nextSpinTime,
 
       // المصدر الوحيد لبيانات المسابقة: وثيقة Contest النشطة
@@ -276,6 +301,7 @@ exports.spinWheel = async (req, res) => {
           pendingAdToken: null,
           adTokenExpiresAt: null,
           adVerified: false,
+            lastAdAt: now,
         },
       };
     } else {
@@ -338,7 +364,16 @@ exports.spinWheel = async (req, res) => {
           if (RESET_POINTS_ON_ENTRY) {
             await WheelUser.updateOne({ userId }, { $inc: { points: -POINTS_TO_ENTER } });
             points -= POINTS_TO_ENTER;
-          }
+
+          
+            await PointsHistory.create({            // 👈 الجديد
+              userId,
+              amount: -POINTS_TO_ENTER,
+              source: "contest_entry",
+              description: "خصم نقاط الدخول في المسابقة 🏆",
+            });
+          }  
+          
           if (joined.participantsCount >= joined.maxParticipants) {
             try {
               await drawWinners(joined);

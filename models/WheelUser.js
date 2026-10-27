@@ -55,6 +55,7 @@ boxAvailable: { type: Boolean, default: true },        // أول مرة متاح
   adTokenExpiresAt: { type: Date, default: null },
   adVerified: { type: Boolean, default: false },
 registeredContest: { type: Number, default: 0 },
+ lastAdAt: { type: Date, default: null },   // 👈 السطر الجديد
 friendPoints: { type: Number, default: 0 },
 }, { timestamps: true });
 
