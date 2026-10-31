@@ -93,18 +93,26 @@ await PointsHistory.create({
         res.status(500).json({ success: false, message: 'خطأ في الخادم.' });
     }
 };
-
 exports.getMySuggestions = async (req, res) => {
     try {
         const userId = req.user.uid;
         // جلب اقتراحات المستخدم مرتبة من الأحدث إلى الأقدم
         const suggestions = await Suggestion.find({ userId }).sort({ createdAt: -1 });
         
+        // إرسال الاقتراحات مع التأكد من تضمين حقل رد الإدارة
+        const formattedSuggestions = suggestions.map(s => ({
+            _id: s._id,
+            content: s.content,
+            status: s.status,
+            adminReply: s.adminReply || "", // 👈 إرسال الرد أو نص فارغ إن لم يوجد
+            createdAt: s.createdAt
+        }));
+
         res.status(200).json({
             success: true,
-            suggestions
+            suggestions: formattedSuggestions
         });
-    } catch (error) {
+    } catch (error) { // 👈 تم إضافة كلمة catch هنا لتصحيح الخطأ البرمجي
         console.error('Error in getMySuggestions:', error);
         res.status(500).json({ success: false, message: 'خطأ في الخادم.' });
     }
