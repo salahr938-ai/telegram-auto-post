@@ -20,6 +20,13 @@ const suggestionSchema = new mongoose.Schema({
         type: String, 
         enum: ['pending', 'approved', 'rejected'], 
         default: 'pending' 
+
+},
+    adminReply: { 
+        type: String, 
+        default: '' // 👈 أضفنا هذا الحقل هنا ليتعرف عليه Mongoose والسيرفر
+
+
     },
     createdAt: { 
         type: Date, 
