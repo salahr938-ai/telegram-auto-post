@@ -2,26 +2,46 @@ const WheelUser = require("../models/WheelUser");
 const PointsHistory = require("../models/PointsHistory");
 const mongoose = require("mongoose");
 
+// ================= الإعدادات (مصدر واحد للقيم) =================
+// السيرفر هو اللي كيقرر النقاط، التطبيق ما كيصيفطش pointsEarned خالص
+const LEVEL_POINTS = 10;
+const LEVEL_POINTS_DOUBLED = 20; // بعد مشاهدة إعلان المكافأة
+const LEVEL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
 // تحديث نقاط ومستوى لعبة المطابقة عند الفوز مع حماية 24 ساعة ضد الغش
 exports.updateScore = async (req, res) => {
     const session = await mongoose.startSession();
     try {
         session.startTransaction();
-        const { userId, pointsEarned, levelCompleted } = req.body;
 
-        if (!userId || !pointsEarned || pointsEarned <= 0 || !levelCompleted) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "بيانات غير صالحة أو المستوى غير مسجل" 
+        // userId من توكن Firebase المتحقق منه، ماشي من body
+        const userId = req.user?.uid;
+        if (!userId) {
+            await session.abortTransaction();
+            return res.status(401).json({ success: false, message: "unauthorized" });
+        }
+
+        const { levelCompleted } = req.body;
+        const doubled = req.body?.doubled === true;
+
+        if (!levelCompleted || Number(levelCompleted) <= 0) {
+            await session.abortTransaction();
+            return res.status(400).json({
+                success: false,
+                message: "بيانات غير صالحة أو المستوى غير مسجل"
             });
         }
+
+        // القيمة ثابتة من السيرفر، بلا ما نثق في أي رقم جاي من التطبيق
+        const pointsEarned = doubled ? LEVEL_POINTS_DOUBLED : LEVEL_POINTS;
 
         // البحث عن المستخدم باستخدام الموديل الموحد WheelUser
         const user = await WheelUser.findOne({ userId }).session(session);
         if (!user) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "المستخدم غير موجود" 
+            await session.abortTransaction();
+            return res.status(404).json({
+                success: false,
+                message: "المستخدم غير موجود"
             });
         }
 
@@ -33,9 +53,8 @@ exports.updateScore = async (req, res) => {
         // التحقق من مرور 24 ساعة لمنع الغش وإعادة لعب نفس المستوى فوراً
         const lastWinTime = user.levelCooldowns.get(levelCompleted.toString());
         const now = new Date();
-        const twentyFourHours = 24 * 60 * 60 * 1000;
 
-        if (lastWinTime && (now - new Date(lastWinTime) < twentyFourHours)) {
+        if (lastWinTime && (now - new Date(lastWinTime) < LEVEL_COOLDOWN_MS)) {
             await session.abortTransaction();
             return res.status(400).json({
                 success: false,
@@ -46,8 +65,8 @@ exports.updateScore = async (req, res) => {
         // تسجيل وقت الفوز الحالي لهذا المستوى
         user.levelCooldowns.set(levelCompleted.toString(), now);
 
-        // إضافة النقاط الجديدة إلى الرصيد الكلي
-        user.points = (user.points || 0) + Number(pointsEarned);
+        // إضافة النقاط الثابتة إلى الرصيد الكلي
+        user.points = (user.points || 0) + pointsEarned;
 
         // تحديث مستوى تقدم اللعبة إذا كان المستوى المكتمل أكبر أو يساوي المخزن حالياً
         if (levelCompleted >= (user.unlockedLevel || 1)) {
@@ -75,9 +94,10 @@ exports.updateScore = async (req, res) => {
 
     } catch (e) {
         await session.abortTransaction();
-        res.status(500).json({ 
-            success: false, 
-            message: e.message 
+        console.error("updateScore error:", e);
+        res.status(500).json({
+            success: false,
+            message: e.message
         });
     } finally {
         session.endSession();
@@ -86,9 +106,13 @@ exports.updateScore = async (req, res) => {
 
 exports.checkLevelStatus = async (req, res) => {
     try {
-        const { userId, level } = req.body;
+        const userId = req.user?.uid;
+        if (!userId) {
+            return res.status(401).json({ allowed: false, message: "unauthorized" });
+        }
 
-        if (!userId || !level) {
+        const { level } = req.body;
+        if (!level) {
             return res.status(400).json({ allowed: false, message: "بيانات غير صالحة" });
         }
 
@@ -104,11 +128,10 @@ exports.checkLevelStatus = async (req, res) => {
 
         const lastWinTime = new Date(user.levelCooldowns.get(level.toString()));
         const now = new Date();
-        const twentyFourHours = 24 * 60 * 60 * 1000;
         const timeDiff = now - lastWinTime;
 
-        if (timeDiff < twentyFourHours) {
-            const remainingMs = twentyFourHours - timeDiff;
+        if (timeDiff < LEVEL_COOLDOWN_MS) {
+            const remainingMs = LEVEL_COOLDOWN_MS - timeDiff;
             const remainingHours = Math.floor(remainingMs / (1000 * 60 * 60));
             const remainingMinutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
 
@@ -121,6 +144,7 @@ exports.checkLevelStatus = async (req, res) => {
         return res.json({ allowed: true, message: "مسموح باللعب" });
 
     } catch (e) {
+        console.error("checkLevelStatus error:", e);
         res.status(500).json({ allowed: false, message: e.message });
     }
 };
