@@ -24,6 +24,7 @@ const match3Routes = require("./routes/match3Routes");
 const waterSortRoutes = require("./routes/waterSortRoutes");
 const duaRoutes = require("./routes/duaRoutes");
 const suggestionRoutes = require("./routes/suggestionRoutes");
+const bombRoutes = require("./routes/bombRoutes");
 // ==========================================
 // 2. إعدادات التطبيق (App Setup)
 // ==========================================
@@ -51,6 +52,7 @@ app.use("/api/referral", referralRoutes);
 app.use("/api/watersort", waterSortRoutes);
 app.use("/api/wheel", wheelRoutes);
 app.use("/api/bot", botRoutes);
+app.use("/api/bomb", bombRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 app.use("/", systemRoutes);
 app.use("/api/user", userRoutes);
