@@ -50,6 +50,11 @@ boxAvailable: { type: Boolean, default: true },        // أول مرة متاح
   bonusAdsDate: { type: String, default: "" },
     bonusAdLastAt: { type: Date, default: null },
 
+bombGame: {
+    roundsPlayedToday: { type: Number, default: 0 },
+    lastResetDate: { type: Date, default: null },
+    lastRoundAt: { type: Date, default: null }
+},
   // 🛡️ حقول حماية إعلانات العجلة المؤقتة
   pendingAdToken: { type: String, default: null },
   adTokenExpiresAt: { type: Date, default: null },
