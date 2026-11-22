@@ -50,11 +50,19 @@ boxAvailable: { type: Boolean, default: true },        // أول مرة متاح
   bonusAdsDate: { type: String, default: "" },
     bonusAdLastAt: { type: Date, default: null },
 
-bombGame: {
-    roundsPlayedToday: { type: Number, default: 0 },
-    lastResetDate: { type: Date, default: null },
-    lastRoundAt: { type: Date, default: null }
-},
+   bombGame: {
+     roundsPlayedToday: { type: Number, default: 0 },
+     lastResetDate: { type: Date, default: null },
+     lastRoundAt: { type: Date, default: null },
+     active: {
+       bombIndexes: { type: [Number], default: [] },
+       pickedIndexes: { type: [Number], default: [] },
+       tileValues: { type: [Number], default: [] },
+       points: { type: Number, default: 0 },
+       reviveUsed: { type: Boolean, default: false },
+       status: { type: String, default: "none" }
+     }
+   },
   // 🛡️ حقول حماية إعلانات العجلة المؤقتة
   pendingAdToken: { type: String, default: null },
   adTokenExpiresAt: { type: Date, default: null },

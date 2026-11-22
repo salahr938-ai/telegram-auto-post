@@ -3,13 +3,19 @@ const router = express.Router();
 const bombController = require("../controllers/bombController");
 const verifyFirebaseToken = require("../middlewares/authMiddleware");
 
-// فحص حالة الجولات المتبقية والرصيد (محمي بـ Firebase Token)
+// الحالة + الجولات المتبقية + استئناف الجولة الجارية
 router.post("/status", verifyFirebaseToken, bombController.getStatus);
 
-// احتساب الجولة ضمن الحد اليومي عند بدء اللعب (محمي بـ Firebase Token)
+// بدء جولة: يزيد العدّاد ذرياً ويولّد القنابل على السيرفر
 router.post("/start", verifyFirebaseToken, bombController.startRound);
 
-// استلام نقاط الجولة عند الانسحاب أو إتمام المربعات الآمنة (محمي بـ Firebase Token)
+// كشف مربع: يرجع نتيجته فقط ولا يكشف باقي اللوحة
+router.post("/pick", verifyFirebaseToken, bombController.pickTile);
+
+// إبطال القنبلة بعد الإعلان (مرة واحدة لكل جولة)
+router.post("/revive", verifyFirebaseToken, bombController.reviveRound);
+
+// صرف ما جمعه السيرفر فقط، دون أي رقم من العميل
 router.post("/claim", verifyFirebaseToken, bombController.claimPoints);
 
 module.exports = router;

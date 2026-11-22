@@ -1,190 +1,269 @@
+const crypto = require("crypto");
 const WheelUser = require("../models/WheelUser");
 const PointsHistory = require("../models/PointsHistory");
-const mongoose = require("mongoose");
 
-const MAX_BOMB_POINTS_PER_ROUND = 450;
+const TILE_COUNT = 12;
+const BOMB_COUNT = 3;
 const MAX_DAILY_BOMB_ROUNDS = 5;
+const POINT_VALUES = [5, 10, 10, 15, 20, 25, 50];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function getNormalizedBombState(user, now) {
-    const bomb = user.bombGame || {};
-    const lastReset = bomb.lastResetDate ? new Date(bomb.lastResetDate) : null;
+const fail = (res, code, message) => res.status(code).json({ success: false, message });
+const serverError = (res, tag, e) => {
+  console.error(tag, e);
+  return fail(res, 500, "خطأ في السيرفر");
+};
 
-    if (!lastReset || (now - lastReset) >= DAY_MS) {
-        return {
-            roundsPlayedToday: 0,
-            lastResetDate: lastReset,
-            lastRoundAt: bomb.lastRoundAt || null,
-            expired: true
-        };
-    }
-
-    return {
-        roundsPlayedToday: bomb.roundsPlayedToday || 0,
-        lastResetDate: lastReset,
-        lastRoundAt: bomb.lastRoundAt || null,
-        expired: false
-    };
+function genRound() {
+  const bombs = new Set();
+  while (bombs.size < BOMB_COUNT) bombs.add(crypto.randomInt(TILE_COUNT));
+  const tileValues = Array.from({ length: TILE_COUNT }, (_, i) =>
+    bombs.has(i) ? 0 : POINT_VALUES[crypto.randomInt(POINT_VALUES.length)]
+  );
+  return {
+    bombIndexes: [...bombs],
+    tileValues,
+    pickedIndexes: [],
+    points: 0,
+    reviveUsed: false,
+    status: "playing",
+  };
 }
 
-// فحص حالة الجولات المتبقية والرصيد الحالي
+const safePicked = (a) => a.pickedIndexes.filter((i) => !a.bombIndexes.includes(i)).length;
+
+// ───────────────────────── status (+ استئناف الجولة) ─────────────────────────
 exports.getStatus = async (req, res) => {
-    try {
-        const userId = req.user?.uid;
-        if (!userId) {
-            return res.status(401).json({ success: false, allowed: false, message: "unauthorized" });
-        }
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return fail(res, 401, "unauthorized");
 
-        const user = await WheelUser.findOne({ userId });
-        if (!user) {
-            return res.status(404).json({ success: false, allowed: false, message: "المستخدم غير موجود" });
-        }
+    const user = await WheelUser.findOne({ userId });
+    if (!user) return fail(res, 404, "المستخدم غير موجود");
 
-        const now = new Date();
-        const state = getNormalizedBombState(user, now);
-        const remainingRounds = Math.max(0, MAX_DAILY_BOMB_ROUNDS - state.roundsPlayedToday);
+    const now = new Date();
+    const b = user.bombGame || {};
+    const windowOpen = b.lastResetDate && now - new Date(b.lastResetDate) < DAY_MS;
+    const used = windowOpen ? b.roundsPlayedToday || 0 : 0;
+    const remainingRounds = Math.max(0, MAX_DAILY_BOMB_ROUNDS - used);
 
-        return res.json({
-            success: true,
-            allowed: remainingRounds > 0,
-            remainingRounds,
-            maxRounds: MAX_DAILY_BOMB_ROUNDS,
-            totalPoints: user.points || 0,
-            message: remainingRounds > 0
-                ? `متبقي لك ${remainingRounds} جولات اليوم`
-                : "لقد أنهيت الحد اليومي لجولات لعبة القنابل، عد غداً!"
-        });
-    } catch (e) {
-        console.error("bomb getStatus error:", e);
-        return res.status(500).json({ success: false, allowed: false, message: e.message || "خطأ في السيرفر" });
-    }
+    const a = b.active;
+    // لا نرسل إلا المربعات المكشوفة، ولا نكشف باقي اللوحة أبداً
+    const resume =
+      a && (a.status === "playing" || a.status === "exploded")
+        ? {
+            status: a.status,
+            roundPoints: a.points,
+            reviveUsed: a.reviveUsed,
+            picked: a.pickedIndexes.map((i) => ({
+              index: i,
+              isBomb: a.bombIndexes.includes(i),
+              points: a.tileValues[i],
+            })),
+          }
+        : null;
+
+    return res.json({
+      success: true,
+      allowed: remainingRounds > 0,
+      remainingRounds,
+      maxRounds: MAX_DAILY_BOMB_ROUNDS,
+      totalPoints: user.points || 0,
+      resume,
+      message:
+        remainingRounds > 0
+          ? `متبقي لك ${remainingRounds} جولات اليوم`
+          : "لقد أنهيت الحد اليومي لجولات لعبة القنابل، عد غداً!",
+    });
+  } catch (e) {
+    return serverError(res, "bomb status", e);
+  }
 };
 
-// حساب الجولة ضمن الحد اليومي بمجرد بدء اللعب (أول ضغطة أو بدء الجولة)
+// ───────────────────────── start ─────────────────────────
 exports.startRound = async (req, res) => {
-    const session = await mongoose.startSession();
-    try {
-        session.startTransaction();
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return fail(res, 401, "unauthorized");
 
-        const userId = req.user?.uid;
-        if (!userId) {
-            await session.abortTransaction();
-            return res.status(401).json({ success: false, allowed: false, message: "unauthorized" });
-        }
+    const now = new Date();
+    const cutoff = new Date(now - DAY_MS);
+    const active = genRound();
 
-        const user = await WheelUser.findOne({ userId }).session(session);
-        if (!user) {
-            await session.abortTransaction();
-            return res.status(404).json({ success: false, allowed: false, message: "المستخدم غير موجود" });
-        }
+    // 1) النافذة اليومية سارية: زيادة العدّاد ذرياً بشرط عدم بلوغ الحد
+    let user = await WheelUser.findOneAndUpdate(
+      {
+        userId,
+        "bombGame.lastResetDate": { $gt: cutoff },
+        "bombGame.roundsPlayedToday": { $lt: MAX_DAILY_BOMB_ROUNDS },
+      },
+      {
+        $inc: { "bombGame.roundsPlayedToday": 1 },
+        $set: { "bombGame.lastRoundAt": now, "bombGame.active": active },
+      },
+      { new: true }
+    );
 
-        const now = new Date();
-        const state = getNormalizedBombState(user, now);
-        const currentRounds = state.expired ? 0 : state.roundsPlayedToday;
-        const resetDate = state.expired ? now : state.lastResetDate;
-
-        if (currentRounds >= MAX_DAILY_BOMB_ROUNDS) {
-            await session.abortTransaction();
-            return res.status(400).json({
-                success: false,
-                allowed: false,
-                remainingRounds: 0,
-                totalPoints: user.points || 0,
-                message: "لقد أنهيت الحد اليومي لجولات لعبة القنابل، عد غداً!"
-            });
-        }
-
-        const nextRoundsPlayed = currentRounds + 1;
-
-        user.bombGame = {
-            roundsPlayedToday: nextRoundsPlayed,
-            lastResetDate: resetDate,
-            lastRoundAt: now
-        };
-        user.markModified("bombGame");
-
-        await user.save({ session });
-        await session.commitTransaction();
-
-        const remainingRounds = Math.max(0, MAX_DAILY_BOMB_ROUNDS - nextRoundsPlayed);
-
-        return res.json({
-            success: true,
-            allowed: true,
-            remainingRounds,
-            totalPoints: user.points || 0,
-            message: "تم احتساب الجولة بنجاح"
-        });
-    } catch (e) {
-        await session.abortTransaction();
-        console.error("bomb startRound error:", e);
-        return res.status(500).json({ success: false, allowed: false, message: e.message || "خطأ في السيرفر" });
-    } finally {
-        session.endSession();
+    // 2) النافذة منتهية أو لم تبدأ: تصفير العدّاد وبدء نافذة جديدة
+    if (!user) {
+      user = await WheelUser.findOneAndUpdate(
+        {
+          userId,
+          $or: [{ "bombGame.lastResetDate": null }, { "bombGame.lastResetDate": { $lte: cutoff } }],
+        },
+        {
+          $set: {
+            "bombGame.roundsPlayedToday": 1,
+            "bombGame.lastResetDate": now,
+            "bombGame.lastRoundAt": now,
+            "bombGame.active": active,
+          },
+        },
+        { new: true }
+      );
     }
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        allowed: false,
+        remainingRounds: 0,
+        message: "لقد أنهيت الحد اليومي لجولات لعبة القنابل، عد غداً!",
+      });
+    }
+
+    return res.json({
+      success: true,
+      allowed: true,
+      remainingRounds: Math.max(0, MAX_DAILY_BOMB_ROUNDS - user.bombGame.roundsPlayedToday),
+      totalPoints: user.points || 0,
+      tileCount: TILE_COUNT,
+      message: "بدأت الجولة",
+    });
+  } catch (e) {
+    return serverError(res, "bomb start", e);
+  }
 };
 
-// استلام النقاط عند الانسحاب أو كشف كل المربعات الآمنة (دون زيادة عدد الجولات مرة أخرى)
-exports.claimPoints = async (req, res) => {
-    const session = await mongoose.startSession();
-    try {
-        session.startTransaction();
+// ───────────────────────── pick ─────────────────────────
+exports.pickTile = async (req, res) => {
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return fail(res, 401, "unauthorized");
 
-        const userId = req.user?.uid;
-        if (!userId) {
-            await session.abortTransaction();
-            return res.status(401).json({ success: false, message: "unauthorized" });
-        }
-
-        const pointsEarned = Number(req.body?.pointsEarned);
-        const reason = req.body?.reason === "CLEARED" ? "CLEARED" : "CASHOUT";
-
-        if (!Number.isFinite(pointsEarned) || pointsEarned <= 0 || !Number.isInteger(pointsEarned)) {
-            await session.abortTransaction();
-            return res.status(400).json({ success: false, message: "قيمة النقاط غير صالحة" });
-        }
-
-        if (pointsEarned > MAX_BOMB_POINTS_PER_ROUND) {
-            await session.abortTransaction();
-            return res.status(400).json({ success: false, message: "قيمة النقاط تجاوزت الحد المسموح للجولة" });
-        }
-
-        const user = await WheelUser.findOne({ userId }).session(session);
-        if (!user) {
-            await session.abortTransaction();
-            return res.status(404).json({ success: false, message: "المستخدم غير موجود" });
-        }
-
-        user.points = (user.points || 0) + pointsEarned;
-        await user.save({ session });
-
-        await PointsHistory.create([{
-            userId,
-            amount: pointsEarned,
-            source: "bomb_game",
-            description: reason === "CLEARED"
-                ? `ربحت ${pointsEarned} نقطة بعد كشف كل المربعات الآمنة في لعبة القنابل!`
-                : `انسحبت وربحت ${pointsEarned} نقطة من لعبة القنابل!`
-        }], { session });
-
-        await session.commitTransaction();
-
-        const now = new Date();
-        const state = getNormalizedBombState(user, now);
-        const remainingRounds = Math.max(0, MAX_DAILY_BOMB_ROUNDS - (state.expired ? 0 : state.roundsPlayedToday));
-
-        return res.json({
-            success: true,
-            totalPoints: user.points,
-            addedPoints: pointsEarned,
-            remainingRounds,
-            message: "تم حفظ النقاط بنجاح"
-        });
-    } catch (e) {
-        await session.abortTransaction();
-        console.error("bomb claimPoints error:", e);
-        return res.status(500).json({ success: false, message: e.message || "خطأ في السيرفر" });
-    } finally {
-        session.endSession();
+    const index = Number(req.body?.index);
+    if (!Number.isInteger(index) || index < 0 || index >= TILE_COUNT) {
+      return fail(res, 400, "مربع غير صالح");
     }
+
+    const user = await WheelUser.findOne({ userId }, { bombGame: 1 });
+    const a = user?.bombGame?.active;
+    if (!a || a.status !== "playing" || a.pickedIndexes.includes(index)) {
+      return fail(res, 400, "لا يمكن كشف هذا المربع");
+    }
+
+    const isBomb = a.bombIndexes.includes(index);
+    const gained = isBomb ? 0 : a.tileValues[index];
+
+    const upd = await WheelUser.findOneAndUpdate(
+      {
+        userId,
+        "bombGame.active.status": "playing",
+        "bombGame.active.pickedIndexes": { $ne: index },
+      },
+      {
+        $push: { "bombGame.active.pickedIndexes": index },
+        $inc: { "bombGame.active.points": gained },
+        ...(isBomb ? { $set: { "bombGame.active.status": "exploded" } } : {}),
+      },
+      { new: true }
+    );
+    if (!upd) return fail(res, 409, "طلب مكرر");
+
+    const na = upd.bombGame.active;
+    return res.json({
+      success: true,
+      isBomb,
+      points: gained,
+      roundPoints: na.points,
+      status: na.status,
+      safeLeft: TILE_COUNT - BOMB_COUNT - safePicked(na),
+      revivable: isBomb && !na.reviveUsed,
+    });
+  } catch (e) {
+    return serverError(res, "bomb pick", e);
+  }
+};
+
+// ───────────────────────── revive ─────────────────────────
+// تنبيه: هذا المسار لا يثبت أن المستخدم شاهد الإعلان فعلاً.
+// للحماية الكاملة اربطه بـ AdMob Server-Side Verification.
+exports.reviveRound = async (req, res) => {
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return fail(res, 401, "unauthorized");
+
+    const user = await WheelUser.findOneAndUpdate(
+      { userId, "bombGame.active.status": "exploded", "bombGame.active.reviveUsed": false },
+      { $set: { "bombGame.active.status": "playing", "bombGame.active.reviveUsed": true } },
+      { new: true }
+    );
+    if (!user) return fail(res, 400, "لا يمكن إبطال القنبلة");
+
+    return res.json({
+      success: true,
+      roundPoints: user.bombGame.active.points,
+      status: "playing",
+    });
+  } catch (e) {
+    return serverError(res, "bomb revive", e);
+  }
+};
+
+// ───────────────────────── claim ─────────────────────────
+exports.claimPoints = async (req, res) => {
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return fail(res, 401, "unauthorized");
+
+    const user = await WheelUser.findOne({ userId }, { bombGame: 1 });
+    const a = user?.bombGame?.active;
+    if (!a || a.status !== "playing" || a.points <= 0) {
+      return fail(res, 400, "لا توجد نقاط للاستلام");
+    }
+
+    const amount = a.points;
+    const cleared = safePicked(a) === TILE_COUNT - BOMB_COUNT;
+
+    // الصرف ذري: تُغلق الجولة في نفس العملية فلا يمكن صرفها مرتين
+    const upd = await WheelUser.findOneAndUpdate(
+      { userId, "bombGame.active.status": "playing", "bombGame.active.points": amount },
+      {
+        $inc: { points: amount },
+        $set: { "bombGame.active.status": "none", "bombGame.active.points": 0 },
+      },
+      { new: true }
+    );
+    if (!upd) return fail(res, 409, "طلب مكرر");
+
+    await PointsHistory.create({
+      userId,
+      amount,
+      source: "bomb_game",
+      description: cleared
+        ? `ربحت ${amount} نقطة بعد كشف كل المربعات الآمنة في لعبة القنابل!`
+        : `انسحبت وربحت ${amount} نقطة من لعبة القنابل!`,
+    });
+
+    return res.json({
+      success: true,
+      totalPoints: upd.points,
+      addedPoints: amount,
+      remainingRounds: Math.max(0, MAX_DAILY_BOMB_ROUNDS - (upd.bombGame.roundsPlayedToday || 0)),
+      cleared,
+      message: "تم حفظ النقاط بنجاح",
+    });
+  } catch (e) {
+    return serverError(res, "bomb claim", e);
+  }
 };
