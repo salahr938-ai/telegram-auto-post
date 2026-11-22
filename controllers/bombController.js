@@ -101,6 +101,7 @@ exports.startRound = async (req, res) => {
             lastResetDate: resetDate,
             lastRoundAt: now
         };
+        user.markModified("bombGame");
 
         await user.save({ session });
         await session.commitTransaction();
