@@ -32,6 +32,13 @@ function genRound() {
 
 const safePicked = (a) => a.pickedIndexes.filter((i) => !a.bombIndexes.includes(i)).length;
 
+// الوقت المتبقي (بالميلي ثانية) حتى تتجدد جولات اليوم؛ 0 إذا كانت النافذة منتهية
+const resetInMsOf = (bombGame, now = new Date()) => {
+  const lr = bombGame?.lastResetDate;
+  if (!lr) return 0;
+  return Math.max(0, new Date(lr).getTime() + DAY_MS - now.getTime());
+};
+
 // ───────────────────────── status (+ استئناف الجولة) ─────────────────────────
 exports.getStatus = async (req, res) => {
   try {
@@ -67,6 +74,7 @@ exports.getStatus = async (req, res) => {
       success: true,
       allowed: remainingRounds > 0,
       remainingRounds,
+      resetInMs: remainingRounds > 0 ? 0 : resetInMsOf(b, now),
       maxRounds: MAX_DAILY_BOMB_ROUNDS,
       totalPoints: user.points || 0,
       resume,
@@ -124,10 +132,12 @@ exports.startRound = async (req, res) => {
     }
 
     if (!user) {
+      const cur = await WheelUser.findOne({ userId }, { bombGame: 1 });
       return res.status(400).json({
         success: false,
         allowed: false,
         remainingRounds: 0,
+        resetInMs: resetInMsOf(cur?.bombGame, now),
         message: "لقد أنهيت الحد اليومي لجولات لعبة القنابل، عد غداً!",
       });
     }
@@ -260,6 +270,7 @@ exports.claimPoints = async (req, res) => {
       totalPoints: upd.points,
       addedPoints: amount,
       remainingRounds: Math.max(0, MAX_DAILY_BOMB_ROUNDS - (upd.bombGame.roundsPlayedToday || 0)),
+      resetInMs: resetInMsOf(upd.bombGame),
       cleared,
       message: "تم حفظ النقاط بنجاح",
     });
