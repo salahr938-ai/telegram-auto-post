@@ -25,6 +25,7 @@ const waterSortRoutes = require("./routes/waterSortRoutes");
 const duaRoutes = require("./routes/duaRoutes");
 const suggestionRoutes = require("./routes/suggestionRoutes");
 const bombRoutes = require("./routes/bombRoutes");
+const r2VideoRoutes = require("./routes/r2Video.routes");
 // ==========================================
 // 2. إعدادات التطبيق (App Setup)
 // ==========================================
@@ -63,6 +64,7 @@ app.use('/api/scratch', scratchRoutes);
 app.use("/api/surprise-box", surpriseBoxRoutes);
 app.use("/api/match3", match3Routes);
 app.use("/api/suggestions", suggestionRoutes);
+app.use("/api/r2-videos", r2VideoRoutes);
 // ==========================================
 // 4. الاتصال بقاعدة البيانات والتشغيل
 // ==========================================
