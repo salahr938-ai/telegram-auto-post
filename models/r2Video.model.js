@@ -27,6 +27,22 @@ const r2VideoSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    thumbnailKey: {
+      type: String,
+      default: "",
+    },
+    thumbnailUrl: {
+      type: String,
+      default: "",
+    },
+    width: {
+      type: Number,
+      default: 0,
+    },
+    height: {
+      type: Number,
+      default: 0,
+    },
     durationSec: {
       type: Number,
       required: true,

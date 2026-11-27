@@ -11,10 +11,19 @@ const r2Client = new S3Client({
   },
 });
 
-// 1) طلب رابط رفع مباشر إلى Cloudflare R2
+function validatePortraitIfProvided(width, height) {
+  const w = Number(width);
+  const h = Number(height);
+  if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+    return h > w;
+  }
+  return true;
+}
+
+// 1) طلب رابط رفع مباشر إلى Cloudflare R2 للفيديو
 async function requestUploadUrl(req, res) {
   try {
-    const { ownerId, title, durationSec, category, mimeType = "video/mp4" } = req.body;
+    const { ownerId, title, durationSec, width, height, category, mimeType = "video/mp4" } = req.body;
 
     if (!ownerId || !title) {
       return res.status(400).json({ error: "ownerId و title مطلوبان" });
@@ -24,6 +33,12 @@ async function requestUploadUrl(req, res) {
       return res.status(400).json({
         error: "التصنيف غير مسموح به",
         allowedCategories: ALLOWED_R2_CATEGORIES,
+      });
+    }
+
+    if (!validatePortraitIfProvided(width, height)) {
+      return res.status(400).json({
+        error: "يُسمح فقط بالمقاطع الطولية (Shorts)",
       });
     }
 
@@ -45,7 +60,7 @@ async function requestUploadUrl(req, res) {
 
     const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 300 });
     const cleanDomain = (process.env.R2_PUBLIC_DOMAIN || "").replace(/\/+$/, "");
-    const videoUrl = `${cleanDomain}/${videoKey}`;
+    const videoUrl = cleanDomain ? `${cleanDomain}/${videoKey}` : "";
 
     return res.json({
       uploadUrl,
@@ -59,10 +74,57 @@ async function requestUploadUrl(req, res) {
   }
 }
 
+// 1-مكرر) طلب رابط رفع مباشر للصورة المصغرة إلى Cloudflare R2
+async function requestThumbnailUploadUrl(req, res) {
+  try {
+    const { ownerId, mimeType = "image/jpeg" } = req.body;
+
+    if (!ownerId) {
+      return res.status(400).json({ error: "ownerId مطلوب" });
+    }
+
+    const safeMime = mimeType.includes("png") ? "image/png" : "image/jpeg";
+    const ext = safeMime.includes("png") ? "png" : "jpg";
+    const thumbnailKey = `r2-videos/${ownerId}/thumbs/${Date.now()}.${ext}`;
+
+    const command = new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME,
+      Key: thumbnailKey,
+      ContentType: safeMime,
+    });
+
+    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 300 });
+    const cleanDomain = (process.env.R2_PUBLIC_DOMAIN || "").replace(/\/+$/, "");
+    const thumbnailUrl = cleanDomain ? `${cleanDomain}/${thumbnailKey}` : "";
+
+    return res.json({
+      uploadUrl,
+      thumbnailUrl,
+      thumbnailKey,
+      expiresInSec: 300,
+    });
+  } catch (err) {
+    console.error("requestThumbnailUploadUrl error:", err);
+    return res.status(500).json({ error: "تعذر إنشاء رابط رفع الصورة المصغرة" });
+  }
+}
+
 // 2) حفظ بيانات الفيديو في MongoDB بعد رفعه إلى R2
 async function createVideoRecord(req, res) {
   try {
-    const { ownerId, channelName, title, videoKey, videoUrl, durationSec, category } = req.body;
+    const {
+      ownerId,
+      channelName,
+      title,
+      videoKey,
+      videoUrl,
+      thumbnailKey = "",
+      thumbnailUrl = "",
+      durationSec,
+      width,
+      height,
+      category,
+    } = req.body;
 
     if (!ownerId || !title || !videoKey || !videoUrl || !category) {
       return res.status(400).json({ error: "بيانات الفيديو غير مكتملة" });
@@ -70,6 +132,12 @@ async function createVideoRecord(req, res) {
 
     if (!ALLOWED_R2_CATEGORIES.includes(category)) {
       return res.status(400).json({ error: "التصنيف غير مسموح به" });
+    }
+
+    if (!validatePortraitIfProvided(width, height)) {
+      return res.status(400).json({
+        error: "يُسمح فقط بالمقاطع الطولية (Shorts)",
+      });
     }
 
     const duration = Number(durationSec);
@@ -83,6 +151,8 @@ async function createVideoRecord(req, res) {
       title,
       videoKey,
       videoUrl,
+      thumbnailKey,
+      thumbnailUrl,
       durationSec: duration,
       category,
     });
@@ -112,6 +182,7 @@ async function listVideos(req, res) {
 
 module.exports = {
   requestUploadUrl,
+  requestThumbnailUploadUrl,
   createVideoRecord,
   listVideos,
 };
